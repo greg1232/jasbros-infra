@@ -29,6 +29,27 @@ GANGSTER = ("I'm gonna give you to the count of ten to get your ugly, "
 
 SAY_LIMIT = 200         # what a speaker's /api/do say accepts
 
+# What candy watch says, in order. Fixed for now; Claude writes the
+# call-outs in step 2 of docs/candy-watch.md.
+def welcome(costume: str = "") -> str:
+    """The first thing a visitor hears. The costume comes from the camera —
+    Claude names it from the first frame (step 3); until then, from whoever
+    runs the demo."""
+    seen = f" I see you're {_a(costume)}!" if costume.strip() else ""
+    return (f"Welcome to the JAS Brothers Halloween candy computer!{seen} "
+            f"Please take two candies each.")
+
+
+def _a(costume: str) -> str:
+    costume = costume.strip().rstrip(".!")
+    if costume.lower().startswith(("a ", "an ", "the ")):
+        return costume
+    return ("an " if costume[:1].lower() in "aeiou" else "a ") + costume
+
+CALL_OUT = "Hey! I see you took more than two candies. Put them back."
+THANKS = "Thank you. Enjoy your two."
+LAST_CHANCE = "You didn't put them back. All right..."
+
 # Your own copy of the scene, put in the cluster from the laptop by
 # ./jasbros candy clip — never in the image, never in git.
 CLIP = Path(os.environ.get("CLIP", "/clip/home-alone.flac"))
@@ -37,10 +58,25 @@ CLIP = Path(os.environ.get("CLIP", "/clip/home-alone.flac"))
 class Speaker:
     """One Claude speaker, through the API its own dashboard already has."""
 
-    def __init__(self, name: str, url: str, post=None):
+    def __init__(self, name: str, url: str, post=None, get=None):
         self.name, self.url = name, url.rstrip("/")
         self.post = post or _post_json
+        self.get = get or _get_json
         self.last: dict = {}
+
+    def busy(self) -> bool:
+        """Is it talking or playing something? (Not answering counts as no.)"""
+        state = self.get(f"{self.url}/api/speaker", 5) or {}
+        return bool(state.get("talking"))
+
+    def wait_until_quiet(self, sleep=time.sleep, longest: float = 60) -> None:
+        """A speaker answers "Saying it" at once and talks in the background,
+        so the next line waits for this one to finish — or it talks over it."""
+        sleep(1)                        # give it a moment to start
+        waited = 1.0
+        while waited < longest and self.busy():
+            sleep(0.5)
+            waited += 0.5
 
     def say(self, text: str) -> dict:
         text = " ".join(text.split())[:SAY_LIMIT]
@@ -77,6 +113,17 @@ def gangster(speaker: Speaker, here: str, clip: Path = CLIP) -> dict:
         if played["ok"]:
             return played
     return speaker.say(GANGSTER)
+
+
+def _get_json(url: str, timeout: float) -> dict | None:
+    try:
+        with urllib.request.urlopen(url, timeout=timeout) as reply:
+            return json.loads(reply.read())
+    except urllib.error.HTTPError as error:
+        error.close()
+        return None
+    except Exception:
+        return None
 
 
 def _post_json(url: str, body: dict, timeout: float) -> dict | None:
@@ -116,6 +163,9 @@ No camera yet.</div>
 <input id=text maxlength=200 placeholder="Something for the speaker to say">
 <button onclick="say({text:document.getElementById('text').value})">Say it</button>
 <button onclick="say({line:'gangster'})">The gangster line</button>
+<input id=costume maxlength=60 placeholder="Their costume, e.g. scary witch">
+<button onclick="say({wait:10, costume:document.getElementById('costume').value},
+  'api/demo')">The whole thing</button>
 <div id=out></div>
 </main>
 <script>
@@ -126,8 +176,8 @@ fetch(base + 'api/status').then(r => r.json()).then(d => {
   document.getElementById('clip').textContent = d.clip
     ? 'The film clip is here.' : 'No film clip yet, so the speaker says the line.';
 });
-async function say(body) {
-  const r = await fetch(base + 'api/say', {method: 'POST',
+async function say(body, where = 'api/say') {
+  const r = await fetch(base + where, {method: 'POST',
     headers: {'Content-Type': 'application/json'}, body: JSON.stringify(body)});
   const d = await r.json();
   document.getElementById('out').textContent =
@@ -137,9 +187,51 @@ async function say(body) {
 """
 
 
+class Interaction:
+    """One trip to the candy box that took too many, start to finish.
+
+    `put_back` says whether the extras came back while it waited. With no
+    camera yet it is always no, which is the demo: every line, then the film.
+    """
+
+    def __init__(self, speaker: Speaker, here: str, clip: Path = CLIP,
+                 sleep=time.sleep):
+        self.speaker, self.here, self.clip, self.sleep = (speaker, here, clip,
+                                                          sleep)
+        self.steps: list[str] = []
+        self.running = False
+
+    def _say(self, text: str) -> None:
+        self.steps.append(text)
+        self.speaker.say(text)
+        self.speaker.wait_until_quiet(self.sleep)
+
+    def run(self, wait: float = 60, put_back=lambda: False,
+            costume: str = "") -> list[str]:
+        self.running, self.steps = True, []
+        try:
+            self._say(welcome(costume))
+            self._say(CALL_OUT)
+            waited = 0.0
+            while waited < wait:
+                if put_back():
+                    self._say(THANKS)
+                    return self.steps
+                self.sleep(1)
+                waited += 1
+            self._say(LAST_CHANCE)
+            self.steps.append("(the gangster)")
+            gangster(self.speaker, self.here, self.clip)
+            self.speaker.wait_until_quiet(self.sleep)
+            return self.steps
+        finally:
+            self.running = False
+
+
 def serve(speaker: Speaker, port: int, here: str = "",
           clip: Path = CLIP) -> http.server.ThreadingHTTPServer:
     """`here` is this app as the speakers reach it: http://<gmk>/candy."""
+    interaction = Interaction(speaker, here, clip)
     class Pages(http.server.BaseHTTPRequestHandler):
         protocol_version = "HTTP/1.1"
 
@@ -152,7 +244,9 @@ def serve(speaker: Speaker, port: int, here: str = "",
                 return self._json({"speaker": speaker.name,
                                    "speaker_url": speaker.url,
                                    "clip": clip.is_file(),
-                                   "last": speaker.last})
+                                   "last": speaker.last,
+                                   "demo": {"running": interaction.running,
+                                            "steps": interaction.steps}})
             if path == "/healthz":
                 return self._send(200, b"ok\n", "text/plain")
             if path == f"/clip/{clip.name}" and clip.is_file():
@@ -170,6 +264,19 @@ def serve(speaker: Speaker, port: int, here: str = "",
                 if body.get("line") == "gangster":
                     return self._json(gangster(speaker, here, clip))
                 return self._json(speaker.say(str(body.get("text", ""))))
+            if path == "/api/demo":
+                # The whole interaction, with nobody putting anything back.
+                # On a thread: it takes a minute, and the page shouldn't wait.
+                if interaction.running:
+                    return self._json({"ok": False, "said": "Already running."})
+                wait = min(max(float(body.get("wait", 10)), 0), 120)
+                costume = str(body.get("costume", ""))[:60]
+                threading.Thread(target=interaction.run, daemon=True,
+                                 kwargs={"wait": wait,
+                                         "costume": costume}).start()
+                return self._json({"ok": True, "speaker": speaker.name,
+                                   "said": f"Running the demo, waiting "
+                                           f"{wait:.0f} s for the candy."})
             self._send(404, b"not here\n", "text/plain")
 
         def _json(self, data, code: int = 200) -> None:

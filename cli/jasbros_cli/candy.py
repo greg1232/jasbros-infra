@@ -50,6 +50,22 @@ def say_(args) -> int:
     return 0 if answer["ok"] else 1
 
 
+def demo(args) -> int:
+    """The whole interaction on the speaker, with nobody putting it back."""
+    request = urllib.request.Request(
+        APP.url() + "/api/demo",
+        data=json.dumps({"wait": args.wait,
+                         "costume": " ".join(args.costume)}).encode(),
+        headers={"Content-Type": "application/json"})
+    try:
+        with urllib.request.urlopen(request, timeout=10) as reply:
+            answer = json.loads(reply.read())
+    except Exception as error:
+        return fail(f"couldn't reach candy watch at {APP.url()}: {error}")
+    say(f"{answer.get('speaker', '')}: {answer['said']}")
+    return 0 if answer["ok"] else 1
+
+
 def clip(args) -> int:
     """Get the clip, and put it in the cluster for candy watch to serve."""
     if not need("ffmpeg"):
@@ -156,6 +172,13 @@ def add_parser(sub) -> None:
     p.add_argument("--gangster", action="store_true",
                    help="the Home Alone line, in the speaker's voice")
     p.set_defaults(func=say_)
+
+    p = commands.add_parser("demo", help=f"the whole interaction on {SPEAKER}")
+    p.add_argument("costume", nargs="*",
+                   help="what they're dressed as, e.g. scary witch")
+    p.add_argument("--wait", type=float, default=10,
+                   help="seconds to wait for the candy to come back")
+    p.set_defaults(func=demo)
 
     p = commands.add_parser("clip", help="get the Home Alone clip and put "
                             "it in the cluster")

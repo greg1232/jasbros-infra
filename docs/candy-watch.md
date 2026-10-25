@@ -1,6 +1,8 @@
 # Candy watch
 
-A camera watches the candy box. When a kid takes **more than two pieces**,
+The **JAS Brothers Halloween candy computer**. A camera watches the candy box.
+When a trick-or-treater walks up, it welcomes them and names their costume
+(*"I see you're a scary witch!"*). When a kid takes **more than two pieces**,
 a Claude speaker calls them out and asks them to put the extra back. If
 they don't, it plays the gangster's line from *Home Alone* ("…before I pump
 your guts full of lead!").
@@ -10,7 +12,11 @@ chart, with source in `infra/candy-watch/`.
 
 **Status (2026-10-25):** step 1 is done. The pod runs on gmk at
 `http://192.168.4.108/candy`, and `./jasbros candy say …` / `--gangster`
-makes pi4 talk through it. `--gangster` plays **the film clip** on pi4
+makes pi4 talk through it. `./jasbros candy demo scary witch` runs the
+whole interaction on pi4 (welcome with the costume → call-out → wait →
+"You didn't put them back. All right..." → the clip), with nobody putting
+anything back. Each line waits for the last to finish, using the speaker's
+`talking` status. `--gangster` plays **the film clip** on pi4
 (35 s, 1:21–1:56), or says the line if the clip isn't there. Steps 2–5 are design.
 
 ## How it works
@@ -62,7 +68,8 @@ Cost and pace: one frame every 2 s *only while there's motion*. Reolink
 cameras report motion themselves, and until then a cheap local frame
 difference works. A quiet kitchen costs nothing.
 
-**Privacy:** frames are of the kids, and they go to Anthropic's API. Frames
+**Privacy:** frames are of the kids, including other families' kids at the
+door on Halloween, and they go to Anthropic's API. Frames
 are never stored, only the count. The pod's log says what was decided,
 never what was seen.
 
@@ -134,4 +141,5 @@ pipeline can be tested without it.
 | C1 | Which speaker talks? | pi4 for now; one value to change |
 | C2 | How long to put it back? | 60 s |
 | C3 | "More than 2" per what: per visit to the box, or per hour/day? | Per visit: the count settles, then compare to before |
-| C4 | Should it say who? It can't tell the kids apart | No names. "Hey, you" |
+| C4 | Should it say who? It can't tell the kids apart | No names. "Hey, you", or by costume: "Hey, witch!" |
+| C5 | Costume: from the first frame when someone walks up, before any candy is taken | Yes, step 3: Claude names it, and the demo takes it as an argument until then |

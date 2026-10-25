@@ -94,6 +94,85 @@ class Gangster(unittest.TestCase):
         self.assertTrue(reply["ok"])
 
 
+class TalkingSpeaker(FakeSpeaker):
+    """Busy for a few checks after each thing it's asked to do."""
+
+    def __init__(self, busy_for=3, **kw):
+        super().__init__(**kw)
+        self.busy_for, self.left = busy_for, 0
+
+    def post(self, url, body, timeout):
+        self.left = self.busy_for
+        return super().post(url, body, timeout)
+
+    def get(self, url, timeout):
+        self.left -= 1
+        return {"talking": self.left >= 0}
+
+
+class Interactions(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.clip = Path(self.tmp.name) / "home-alone.flac"
+        self.clip.write_bytes(b"fLaC")
+        self.fake = TalkingSpeaker()
+        self.speaker = candy_watch.Speaker("pi4", "http://x", self.fake.post,
+                                           self.fake.get)
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def heard(self):
+        return [b["value"] for _, b in self.fake.heard]
+
+    def test_nobody_puts_it_back(self):
+        candy_watch.Interaction(self.speaker, "http://gmk/candy", self.clip,
+                                sleep=lambda s: None).run(
+            wait=10, costume="scary witch")
+        self.assertEqual(self.heard(), [
+            candy_watch.welcome("scary witch"), candy_watch.CALL_OUT,
+            candy_watch.LAST_CHANCE,
+            "http://gmk/candy/clip/home-alone.flac"])
+
+    def test_put_back_in_time(self):
+        checks = iter([False, False, True])
+        candy_watch.Interaction(self.speaker, "http://gmk/candy", self.clip,
+                                sleep=lambda s: None).run(
+            wait=10, put_back=lambda: next(checks))
+        self.assertEqual(self.heard(), [candy_watch.welcome(),
+                                        candy_watch.CALL_OUT,
+                                        candy_watch.THANKS])
+
+    def test_each_line_waits_for_the_last_to_finish(self):
+        slept = []
+        self.speaker.say("Put them back.")      # busy for three checks
+        self.speaker.wait_until_quiet(slept.append)
+        # 1 s to start, then half-seconds while it reports talking
+        self.assertEqual(slept, [1, 0.5, 0.5, 0.5])
+
+    def test_a_speaker_that_never_goes_quiet_is_given_up_on(self):
+        self.fake.busy_for = 10**9
+        self.fake.left = 10**9
+        slept = []
+        self.speaker.wait_until_quiet(slept.append, longest=5)
+        self.assertEqual(sum(slept), 5)
+
+
+class Welcome(unittest.TestCase):
+    def test_names_the_costume(self):
+        self.assertIn("JAS Brothers Halloween candy computer",
+                      candy_watch.welcome())
+        self.assertIn("I see you're a scary witch!",
+                      candy_watch.welcome("scary witch"))
+        self.assertIn("you're an astronaut!", candy_watch.welcome("astronaut"))
+        self.assertIn("you're the Hulk!", candy_watch.welcome("the Hulk"))
+        self.assertNotIn("I see", candy_watch.welcome("  "))
+
+    def test_fits_what_a_speaker_says(self):
+        self.assertLessEqual(len(candy_watch.welcome("x" * 60)),
+                             candy_watch.SAY_LIMIT)
+
+
 class Page(unittest.TestCase):
     def test_say_and_gangster_over_http(self):
         fake = FakeSpeaker()
