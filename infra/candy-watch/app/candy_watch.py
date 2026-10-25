@@ -18,6 +18,7 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
+from pathlib import Path
 
 # What the gangster in "Angels with Filthy Souls" — the film inside Home
 # Alone — says, spoken by the speaker in its own voice. The film's audio
@@ -27,6 +28,10 @@ GANGSTER = ("I'm gonna give you to the count of ten to get your ugly, "
             "guts full of lead!")
 
 SAY_LIMIT = 200         # what a speaker's /api/do say accepts
+
+# Your own copy of the scene, put in the cluster from the laptop by
+# ./jasbros candy clip — never in the image, never in git.
+CLIP = Path(os.environ.get("CLIP", "/clip/home-alone.flac"))
 
 
 class Speaker:
@@ -51,6 +56,27 @@ class Speaker:
         return {"ok": ok, "speaker": self.name, "text": text,
                 "said": (reply or {}).get("said",
                                           f"{self.name} didn't answer")}
+
+    def play(self, url: str) -> dict:
+        """Ask the speaker to fetch a recording from here and play it."""
+        reply = self.post(f"{self.url}/api/do", {"what": "play", "value": url},
+                          15)
+        said = (reply or {}).get("said", f"{self.name} didn't answer")
+        ok = said.startswith("Playing")
+        self.last = {"at": time.time(), "text": url, "ok": ok,
+                     "speaker": self.name}
+        print(f"[candy] {self.name}: {said} ({url})", flush=True)
+        return {"ok": ok, "speaker": self.name, "said": said, "url": url}
+
+
+def gangster(speaker: Speaker, here: str, clip: Path = CLIP) -> dict:
+    """The line from the film if its clip is here, in the speaker's voice
+    if it isn't — or if the speaker can't play it."""
+    if here and clip.is_file():
+        played = speaker.play(f"{here}/clip/{clip.name}")
+        if played["ok"]:
+            return played
+    return speaker.say(GANGSTER)
 
 
 def _post_json(url: str, body: dict, timeout: float) -> dict | None:
@@ -85,7 +111,8 @@ input{font:inherit;padding:.5rem .6rem;border-radius:9px;width:100%;
 </style>
 <main>
 <h1>Candy watch</h1>
-<div class=sub>Speaking through <b id=who></b>. No camera yet — step 1.</div>
+<div class=sub>Speaking through <b id=who></b>. <span id=clip></span>
+No camera yet.</div>
 <input id=text maxlength=200 placeholder="Something for the speaker to say">
 <button onclick="say({text:document.getElementById('text').value})">Say it</button>
 <button onclick="say({line:'gangster'})">The gangster line</button>
@@ -94,8 +121,11 @@ input{font:inherit;padding:.5rem .6rem;border-radius:9px;width:100%;
 <script>
 const base = location.pathname.endsWith('/') ? location.pathname
                                              : location.pathname + '/';
-fetch(base + 'api/status').then(r => r.json()).then(d =>
-  document.getElementById('who').textContent = d.speaker);
+fetch(base + 'api/status').then(r => r.json()).then(d => {
+  document.getElementById('who').textContent = d.speaker;
+  document.getElementById('clip').textContent = d.clip
+    ? 'The film clip is here.' : 'No film clip yet, so the speaker says the line.';
+});
 async function say(body) {
   const r = await fetch(base + 'api/say', {method: 'POST',
     headers: {'Content-Type': 'application/json'}, body: JSON.stringify(body)});
@@ -107,7 +137,9 @@ async function say(body) {
 """
 
 
-def serve(speaker: Speaker, port: int) -> http.server.ThreadingHTTPServer:
+def serve(speaker: Speaker, port: int, here: str = "",
+          clip: Path = CLIP) -> http.server.ThreadingHTTPServer:
+    """`here` is this app as the speakers reach it: http://<gmk>/candy."""
     class Pages(http.server.BaseHTTPRequestHandler):
         protocol_version = "HTTP/1.1"
 
@@ -119,9 +151,12 @@ def serve(speaker: Speaker, port: int) -> http.server.ThreadingHTTPServer:
             if path == "/api/status":
                 return self._json({"speaker": speaker.name,
                                    "speaker_url": speaker.url,
+                                   "clip": clip.is_file(),
                                    "last": speaker.last})
             if path == "/healthz":
                 return self._send(200, b"ok\n", "text/plain")
+            if path == f"/clip/{clip.name}" and clip.is_file():
+                return self._send(200, clip.read_bytes(), "audio/flac")
             self._send(404, b"not here\n", "text/plain")
 
         def do_POST(self):                                # noqa: N802
@@ -132,9 +167,9 @@ def serve(speaker: Speaker, port: int) -> http.server.ThreadingHTTPServer:
             except ValueError:
                 return self._json({"ok": False, "said": "Not JSON."}, 400)
             if path == "/api/say":
-                text = GANGSTER if body.get("line") == "gangster" \
-                    else str(body.get("text", ""))
-                return self._json(speaker.say(text))
+                if body.get("line") == "gangster":
+                    return self._json(gangster(speaker, here, clip))
+                return self._json(speaker.say(str(body.get("text", ""))))
             self._send(404, b"not here\n", "text/plain")
 
         def _json(self, data, code: int = 200) -> None:
@@ -162,6 +197,8 @@ def main() -> None:
                         help="name=url of the speaker that talks")
     parser.add_argument("--port", type=int,
                         default=int(os.environ.get("PORT", "8000")))
+    parser.add_argument("--here", default=os.environ.get("HERE", ""),
+                        help="this app as the speakers reach it")
     args = parser.parse_args()
     name, _, url = args.speaker.partition("=")
     if not url:
@@ -169,7 +206,9 @@ def main() -> None:
     speaker = Speaker(name, url)
     print(f"[candy] speaking through {name} at {url}; serving on "
           f":{args.port}", flush=True)
-    server = serve(speaker, args.port)
+    print(f"[candy] clip: {CLIP if CLIP.is_file() else 'none'}; "
+          f"speakers fetch from {args.here or 'nowhere'}", flush=True)
+    server = serve(speaker, args.port, args.here.rstrip("/"))
     threading.Thread(target=server.serve_forever, daemon=True).start()
     while True:
         time.sleep(3600)

@@ -387,12 +387,33 @@ def play_clip(audio, rate: int) -> None:
     playable = playable_rate(device, rate)
     samples = (np.asarray(audio, dtype=np.float32) * 32767).astype(np.int16)
 
+    _hushed.clear()
     with _device, sounds.paused():
         speaking.set()
         try:
-            _play(device, playable, _at_rate(samples, rate, playable))
+            _play_until_hushed(device, playable,
+                               _at_rate(samples, rate, playable))
         finally:
             speaking.clear()
+
+
+def _play_until_hushed(device, rate: int, audio) -> None:
+    """_play, a quarter of a second at a time, so that "stop" stops it.
+
+    A clip can be half a minute long — candy watch's is thirty-five
+    seconds — and one write of all of it can't be interrupted.
+    """
+    import numpy as np
+    import sounddevice as sd
+
+    step = max(1, rate // 4)
+    with sd.OutputStream(samplerate=rate, channels=1, dtype="int16",
+                         device=device) as stream:
+        for start in range(0, len(audio), step):
+            if _hushed.is_set():
+                return
+            stream.write(np.ascontiguousarray(audio[start:start + step]))
+        _drain(stream)
 
 
 def _drain(stream) -> None:

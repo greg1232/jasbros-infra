@@ -5,6 +5,7 @@
 
 import json
 import sys
+import tempfile
 import threading
 import unittest
 import urllib.request
@@ -16,12 +17,17 @@ import candy_watch  # noqa: E402
 
 
 class FakeSpeaker:
-    def __init__(self, answers=True):
-        self.heard, self.answers = [], answers
+    def __init__(self, answers=True, plays=True):
+        self.heard, self.answers, self.plays = [], answers, plays
 
     def post(self, url, body, timeout):
         self.heard.append((url, body))
-        return {"said": "Saying it."} if self.answers else None
+        if not self.answers:
+            return None
+        if body["what"] == "play":
+            return {"said": "Playing it — 35 seconds." if self.plays
+                    else "I only play recordings from a numbered address."}
+        return {"said": "Saying it."}
 
 
 class Saying(unittest.TestCase):
@@ -51,6 +57,41 @@ class Saying(unittest.TestCase):
         fake = FakeSpeaker()
         candy_watch.Speaker("pi4", "http://x", fake.post).say("   ")
         self.assertEqual(fake.heard, [])
+
+
+class Gangster(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.clip = Path(self.tmp.name) / "home-alone.flac"
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def test_plays_the_clip_when_there_is_one(self):
+        self.clip.write_bytes(b"fLaC")
+        fake = FakeSpeaker()
+        reply = candy_watch.gangster(candy_watch.Speaker("pi4", "http://x",
+                                                         fake.post),
+                                     "http://10.0.0.1/candy", self.clip)
+        self.assertTrue(reply["ok"])
+        self.assertEqual(fake.heard[0][1], {
+            "what": "play",
+            "value": "http://10.0.0.1/candy/clip/home-alone.flac"})
+
+    def test_says_the_line_without_a_clip(self):
+        fake = FakeSpeaker()
+        candy_watch.gangster(candy_watch.Speaker("pi4", "http://x", fake.post),
+                             "http://10.0.0.1/candy", self.clip)
+        self.assertEqual(fake.heard[0][1]["value"], candy_watch.GANGSTER)
+
+    def test_says_the_line_if_the_speaker_cant_play_it(self):
+        self.clip.write_bytes(b"fLaC")
+        fake = FakeSpeaker(plays=False)       # a speaker on older code
+        reply = candy_watch.gangster(candy_watch.Speaker("pi4", "http://x",
+                                                         fake.post),
+                                     "http://10.0.0.1/candy", self.clip)
+        self.assertEqual([b["what"] for _, b in fake.heard], ["play", "say"])
+        self.assertTrue(reply["ok"])
 
 
 class Page(unittest.TestCase):

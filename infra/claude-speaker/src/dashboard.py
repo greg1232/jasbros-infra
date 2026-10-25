@@ -632,6 +632,8 @@ def do(what: str, value: str) -> dict:
             now = tts.set_volume(value)
             return {"said": "" if now is None else f"Volume {now}%.",
                     "volume": now}
+        if what == "play":
+            return {"said": play_from_home(value)}
         if what == "music":
             # Spotify's own level, which is separate: turning the speaker
             # down should not change what the music is set to when it
@@ -650,6 +652,53 @@ def do(what: str, value: str) -> dict:
     except Exception as error:
         return {"said": f"That didn't work — {type(error).__name__}."}
     return {"said": f"I don't know how to {what}."}
+
+
+LONGEST_CLIP = 8 * 1024 * 1024        # bytes: half a minute of WAV is ~1 MB
+
+
+def play_from_home(url: str) -> str:
+    """Play a recording from another machine in the house.
+
+    For candy watch on gmk (docs/candy-watch.md), which keeps its clip and
+    asks a speaker to play it. Only from a numbered private address — never
+    a name, never the internet — so a page that can reach this one can't
+    point the speaker anywhere else. Fetched and decoded here so a bad file
+    is an answer, not a crash; played on a thread so the page gets that
+    answer straight away. "Stop" stops it.
+    """
+    import io
+    import ipaddress
+    import urllib.request
+
+    import numpy as np
+    import soundfile as sf
+
+    import tts
+
+    parts = urllib.parse.urlparse(url)
+    try:
+        private = ipaddress.ip_address(parts.hostname or "").is_private
+    except ValueError:
+        private = False
+    if parts.scheme != "http" or not private:
+        return "I only play recordings from a numbered address in the house."
+    try:
+        with urllib.request.urlopen(url, timeout=10) as reply:
+            raw = reply.read(LONGEST_CLIP + 1)
+        if len(raw) > LONGEST_CLIP:
+            return "That recording is too big."
+        audio, rate = sf.read(io.BytesIO(raw), dtype="float32",
+                              always_2d=True)
+    except Exception as error:
+        return f"I couldn't get that recording — {type(error).__name__}."
+    audio = audio.mean(axis=1)          # the array is one channel
+    peak = float(np.abs(audio).max()) if len(audio) else 0.0
+    if peak < 0.01:
+        return "That recording is silent."
+    threading.Thread(target=tts.play_clip, args=(audio * (0.9 / peak), rate),
+                     daemon=True).start()
+    return f"Playing it — {len(audio) / rate:.0f} seconds."
 
 
 class Pages(http.server.BaseHTTPRequestHandler):
