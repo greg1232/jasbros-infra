@@ -337,6 +337,10 @@ class Watcher:
         self.called_out: set[int] = set()
         self.baseline: int | None = None        # the box, alone
         self.baseline_at = 0.0
+        # When to count the box alone next. Without this, a box Claude can't
+        # see (none set up yet, camera aimed elsewhere) was asked about again
+        # the moment each "can't see it" came back — ~20 times a minute.
+        self.alone_next = 0.0
         self.count: int | None = None           # the latest believable count
         self.over = 0                           # counts in a row over
         self.recounts = 0
@@ -419,7 +423,8 @@ class Watcher:
                 del self.groups[gid]
                 self._event(f"group {gid} has gone")
                 if not self.groups:
-                    self.baseline_at = 0.0      # recount the box, alone
+                    if self.baseline is not None:
+                        self.alone_next = 0.0   # recount the box they left
                     self.over = 0
                     self._farewell()
 
@@ -435,9 +440,8 @@ class Watcher:
                     and not self.calling_out):
                 self.recounts += 1
                 self._look_soon(self._recount)
-        elif not self.tracker.tracks and (
-                self.baseline is None
-                or now - self.baseline_at >= self.baseline_every):
+        elif not self.tracker.tracks and now >= self.alone_next:
+            self.alone_next = now + 60          # a failed look retries in 1 min
             self._look_soon(self._alone)
 
     # -- the switch
@@ -588,9 +592,16 @@ class Watcher:
     def _alone(self) -> None:
         still = self.camera.still()
         seen = self.eyes.ask([still], RECOUNT, COUNT_SCHEMA) if still else None
-        if not seen or not self._believable(seen):
+        if not seen:
             return
+        if seen["candies"] < 0:
+            with self.lock:                     # no box in view: wait a while
+                self.alone_next = self.clock() + 600
+            return
+        if not self._believable(seen):
+            return                              # blocked: the 1 min retry
         with self.lock:
+            self.alone_next = self.clock() + self.baseline_every
             if self.groups:
                 return                  # somebody turned up meanwhile
             self.baseline = self.count = seen["candies"]

@@ -175,6 +175,20 @@ class Groups(unittest.TestCase):
         self.run_frames(w, [], 1800)
         self.assertEqual(len(self.eyes.questions), 2)
 
+    def test_no_box_in_view_isnt_asked_about_over_and_over(self):
+        w = self.watcher(counts=[(-1, False)])
+        self.run_frames(w, [], 600)                 # ten empty minutes
+        self.assertEqual(len(self.eyes.questions), 1)
+        self.run_frames(w, [], 1)
+        self.assertEqual(len(self.eyes.questions), 2)   # then once more
+
+    def test_a_blocked_box_is_tried_again_in_a_minute(self):
+        w = self.watcher(counts=[(30, True), (30, False)])
+        self.run_frames(w, [], 59)
+        self.assertEqual(len(self.eyes.questions), 1)
+        self.run_frames(w, [], 2)
+        self.assertEqual(w.baseline, 30)
+
     def test_one_costume_look_per_group(self):
         w = self.watcher(costumes=[("scary witch", 1)])
         self.run_frames(w, [], 1)
