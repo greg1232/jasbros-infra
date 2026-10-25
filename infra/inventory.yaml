@@ -1,0 +1,29 @@
+# Every machine on the home network, in one file.
+#
+# This is an Ansible inventory, and ./jasbros reads it too. The addresses are
+# where each machine was LAST SEEN — nothing has a DHCP reservation yet (see
+# docs/open-questions.md Q1). When one moves:
+#
+#     ./jasbros gmk find --update
+#     ./jasbros speaker scan --update
+#
+# Secrets never go in this file.
+
+all:
+  vars:
+    lan_subnet: 192.168.4.0/22
+  children:
+    servers:
+      hosts:
+        gmk:
+          ansible_host: 192.168.4.108
+          ansible_user: normal
+    speakers:
+      vars:
+        ansible_user: normal
+        dashboard_port: 8080
+      hosts:
+        bedroom:
+          ansible_host: 192.168.4.22
+        pi4:
+          ansible_host: 192.168.4.95

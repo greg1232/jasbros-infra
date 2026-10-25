@@ -1,0 +1,27 @@
+#!/bin/bash
+#
+# The one command for the jasbros platform.  ./jasbros --help
+#
+# Everything happens in cli/jasbros_cli. This only makes sure the virtualenv
+# it runs in exists and matches cli/pyproject.toml and the Ansible
+# collections in infra/gmk/requirements.yml, so nothing is installed globally.
+
+set -euo pipefail
+cd "$(dirname "$0")"
+
+VENV=.venv
+WANT=$(cat cli/pyproject.toml infra/gmk/requirements.yml | shasum | cut -d' ' -f1)
+HAVE=$(cat "$VENV/.jasbros-hash" 2>/dev/null || true)
+
+if [ ! -x "$VENV/bin/python" ] || [ "$WANT" != "$HAVE" ]; then
+    echo "[jasbros] setting up $VENV — once, or after a dependency changes" >&2
+    python3 -m venv "$VENV"
+    "$VENV/bin/pip" install --quiet --upgrade pip
+    "$VENV/bin/pip" install --quiet -e cli/
+    ANSIBLE_COLLECTIONS_PATH="$VENV/collections" \
+        "$VENV/bin/ansible-galaxy" collection install --upgrade \
+        -r infra/gmk/requirements.yml -p "$VENV/collections" >/dev/null
+    echo "$WANT" > "$VENV/.jasbros-hash"
+fi
+
+exec "$VENV/bin/python" -m jasbros_cli "$@"

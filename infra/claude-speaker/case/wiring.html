@@ -1,0 +1,355 @@
+<title>Inside the Speaker Puck</title>
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@600;700&family=Source+Sans+3:wght@400;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+:root {
+  --ground:#EEF1F5; --sheet:#FFFFFF; --ink:#0F1A24; --muted:#5A6B7B;
+  --rule:#C3D0DB; --hair:#E0E8EF; --faint:#F0F4F8;
+  --pwr:#A9530A; --data:#3B36B8; --audio:#0C6B63; --flag:#A81E1E;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --ground:#0B1017; --sheet:#131C25; --ink:#E4ECF3; --muted:#93A5B5;
+    --rule:#2B3945; --hair:#1D2731; --faint:#182230;
+    --pwr:#F0A455; --data:#A8AEFF; --audio:#4FD9C6; --flag:#F08585;
+  }
+}
+:root[data-theme="dark"] {
+  --ground:#0B1017; --sheet:#131C25; --ink:#E4ECF3; --muted:#93A5B5;
+  --rule:#2B3945; --hair:#1D2731; --faint:#182230;
+  --pwr:#F0A455; --data:#A8AEFF; --audio:#4FD9C6; --flag:#F08585;
+}
+* { box-sizing:border-box; }
+body {
+  margin:0; background:var(--ground); color:var(--ink);
+  font-family:"Source Sans 3",system-ui,sans-serif; font-size:16px; line-height:1.6;
+  padding:40px 20px 72px;
+}
+.wrap { max-width:1000px; margin:0 auto; display:flex; flex-direction:column; gap:34px; }
+header { display:flex; flex-direction:column; gap:10px; }
+.eyebrow {
+  font-family:"IBM Plex Mono",monospace; font-size:12px; letter-spacing:.14em;
+  text-transform:uppercase; color:var(--muted);
+}
+h1 {
+  font-family:Archivo,system-ui,sans-serif; font-weight:700; font-size:clamp(30px,5vw,46px);
+  line-height:1.05; letter-spacing:-.02em; margin:0; text-wrap:balance;
+}
+.sub { color:var(--muted); max-width:62ch; margin:0; }
+.spec {
+  display:flex; flex-wrap:wrap; gap:0; border:1px solid var(--rule);
+  border-radius:3px; overflow:hidden; background:var(--sheet);
+}
+.spec div { flex:1 1 128px; padding:11px 15px; border-right:1px solid var(--hair); }
+.spec div:last-child { border-right:0; }
+.spec dt {
+  font-family:"IBM Plex Mono",monospace; font-size:10.5px; letter-spacing:.11em;
+  text-transform:uppercase; color:var(--muted); margin:0 0 3px;
+}
+.spec dd {
+  margin:0; font-family:Archivo,sans-serif; font-weight:600; font-size:19px;
+  font-variant-numeric:tabular-nums;
+}
+figure {
+  margin:0; background:var(--sheet); border:1px solid var(--rule); border-radius:3px;
+  padding:22px 20px 16px; display:flex; flex-direction:column; gap:14px;
+}
+.figscroll { overflow-x:auto; }
+svg { display:block; width:100%; height:auto; min-width:520px; color:var(--ink); }
+figcaption {
+  font-size:14.5px; color:var(--muted); border-top:1px solid var(--hair);
+  padding-top:11px; max-width:72ch;
+}
+figcaption b { color:var(--ink); font-weight:600; }
+h2 {
+  font-family:Archivo,sans-serif; font-weight:600; font-size:13px; letter-spacing:.13em;
+  text-transform:uppercase; color:var(--muted); margin:0 0 -18px;
+}
+table { width:100%; border-collapse:collapse; font-size:15px; }
+th {
+  text-align:left; font-family:"IBM Plex Mono",monospace; font-weight:500; font-size:10.5px;
+  letter-spacing:.11em; text-transform:uppercase; color:var(--muted);
+  padding:0 12px 8px 0; border-bottom:1px solid var(--rule);
+}
+td { padding:11px 12px 11px 0; border-bottom:1px solid var(--hair); vertical-align:top; }
+tr:last-child td { border-bottom:0; }
+.swatch {
+  display:inline-block; width:22px; height:3px; border-radius:2px; vertical-align:middle;
+  margin-right:9px;
+}
+.mono { font-family:"IBM Plex Mono",monospace; font-size:13.5px; font-variant-numeric:tabular-nums; }
+.note {
+  background:var(--faint); border:1px solid var(--rule); border-left:3px solid var(--flag);
+  border-radius:3px; padding:16px 19px; display:flex; flex-direction:column; gap:7px;
+}
+.note h3 { font-family:Archivo,sans-serif; font-size:16px; margin:0; font-weight:600; }
+.note p { margin:0; font-size:15px; }
+.note p:last-child { color:var(--muted); }
+
+/* drawing */
+.wall { fill:none; stroke:currentColor; stroke-width:2.4; opacity:.85; }
+.cut { stroke:currentColor; stroke-width:1.1; opacity:.85; }
+.openarc { fill:none; stroke:currentColor; stroke-width:1; stroke-dasharray:3 3; opacity:.32; }
+.shelf { fill:currentColor; opacity:.10; }
+.col { fill:currentColor; opacity:.26; }
+.screw { fill:var(--sheet); stroke:currentColor; stroke-width:.7; opacity:.9; }
+.array { fill:none; stroke:currentColor; stroke-width:.9; stroke-dasharray:6 4; opacity:.5; }
+.sockzone { fill:none; stroke:currentColor; stroke-width:2.6; opacity:.35; }
+.led { fill:currentColor; opacity:.38; }
+.mic { fill:none; stroke:currentColor; stroke-width:1; opacity:.62; }
+.pi { fill:currentColor; fill-opacity:.07; stroke:currentColor; stroke-width:1.1; }
+.stand { fill:currentColor; opacity:.22; }
+.standhole { fill:var(--sheet); }
+.port { fill:currentColor; opacity:.45; }
+.pwr { fill:var(--pwr); }
+.usb3 { fill:var(--data); }
+.plugbody { fill-opacity:.16; stroke-width:1; }
+.lead { fill:none; stroke-width:2.6; stroke-linecap:round; }
+.leadhead { stroke:none; }
+.pwr-s { stroke:var(--pwr); fill:var(--pwr); }
+.data-s { stroke:var(--data); fill:var(--data); }
+.audio-s { stroke:var(--audio); fill:var(--audio); }
+.pwr-t { fill:var(--pwr); font-weight:600; }
+.data-t { fill:var(--data); font-weight:600; }
+.audio-t { fill:var(--audio); font-weight:600; }
+.lbl text {
+  font-family:"IBM Plex Mono",monospace; font-size:5.2px; fill:currentColor;
+}
+.lbl .strong { font-family:Archivo,sans-serif; font-size:6px; font-weight:600; }
+.lbl .dim { opacity:.62; font-size:4.6px; }
+.ldr { stroke:currentColor; stroke-width:.4; opacity:.45; }
+.floor,.wallsec,.colsec,.arraysec,.lidsec { fill:currentColor; opacity:.55; }
+.shelfsec { fill:currentColor; opacity:.16; }
+.pisec { fill:var(--data); opacity:.75; }
+.pitall { fill:currentColor; opacity:.10; stroke:currentColor; stroke-width:.4; stroke-dasharray:2 2; }
+.foot { fill:currentColor; opacity:.3; }
+.sec .stand { opacity:.3; }
+.dimline { stroke:currentColor; stroke-width:.4; opacity:.5; }
+.dimtext { font-family:"IBM Plex Mono",monospace; font-size:5px; fill:currentColor; opacity:.7; }
+@media (prefers-reduced-motion:no-preference) { :focus-visible { outline:2px solid var(--data); outline-offset:2px; } }
+</style>
+
+<div class="wrap">
+<header>
+  <div class="eyebrow">Claude speaker · case v2 · Ø140</div>
+  <h1>Where the Pi goes, and where the wires go</h1>
+  <p class="sub">Everything below is drawn at its real coordinates, straight out of
+  <span class="mono">case/speaker-case.scad</span>. The Pi lies flat in the bottom, the mic
+  array is the ceiling above it, and three leads have to get in and out.</p>
+</header>
+
+<dl class="spec">
+  <div><dt>Case</dt><dd>Ø140 × 43</dd></div>
+  <div><dt>Rear doorway</dt><dd>230°–302°</dd></div>
+  <div><dt>Port doorway</dt><dd>335°–25°</dd></div>
+  <div><dt>Columns</dt><dd>45 · 135 · 180 · 315</dd></div>
+  <div><dt>Array sits at</dt><dd>34.9 mm</dd></div>
+  <div><dt>Cable headroom</dt><dd>9 mm</dd></div>
+</dl>
+
+<h2>Plan — looking down, lid removed</h2>
+<figure>
+  <div class="figscroll">
+  <svg viewBox="-108 -92 216 200" role="img"
+       aria-label="Plan view of the case: the Raspberry Pi lies flat in the middle on four standoffs, the mic array sits above it as a dashed 100 mm circle, three cables route to a rear doorway spanning 230 to 302 degrees, and a second doorway from 335 to 25 degrees leaves the Ethernet and USB ports reachable.">
+<path class="wall" d="M 36.46,58.35 A 68.8 68.8 0 0 0 62.35,29.08" />
+<path class="wall" d="M 62.35,-29.08 A 68.8 68.8 0 1 0 -44.22,52.70" />
+<line class="cut" x1="-43.45" y1="51.78" x2="-45.00" y2="53.62" />
+<line class="cut" x1="35.82" y1="57.33" x2="37.09" y2="59.36" />
+<path class="openarc" d="M -44.22,52.70 A 68.8 68.8 0 0 0 36.46,58.35" />
+<line class="cut" x1="61.27" y1="28.57" x2="63.44" y2="29.58" />
+<line class="cut" x1="61.27" y1="-28.57" x2="63.44" y2="-29.58" />
+<path class="openarc" d="M 62.35,29.08 A 68.8 68.8 0 0 0 62.35,-29.08" />
+<polygon class="shelf" points="28.99,-33.23 45.68,-49.92 49.92,-45.68 33.23,-28.99" />
+<polygon class="col" points="32.53,-38.89 44.62,-50.98 50.98,-44.62 38.89,-32.53" />
+<circle class="screw" cx="45.96" cy="-45.96" r="1.7" />
+<polygon class="shelf" points="-33.23,-28.99 -49.92,-45.68 -45.68,-49.92 -28.99,-33.23" />
+<polygon class="col" points="-38.89,-32.53 -50.98,-44.62 -44.62,-50.98 -32.53,-38.89" />
+<circle class="screw" cx="-45.96" cy="-45.96" r="1.7" />
+<polygon class="shelf" points="-44.00,3.00 -67.60,3.00 -67.60,-3.00 -44.00,-3.00" />
+<polygon class="col" points="-50.50,4.50 -67.60,4.50 -67.60,-4.50 -50.50,-4.50" />
+<circle class="screw" cx="-65.00" cy="-0.00" r="1.7" />
+<polygon class="shelf" points="33.23,28.99 49.92,45.68 45.68,49.92 28.99,33.23" />
+<polygon class="col" points="38.89,32.53 50.98,44.62 44.62,50.98 32.53,38.89" />
+<circle class="screw" cx="45.96" cy="45.96" r="1.7" />
+<circle class="array" cx="0" cy="0" r="50.0" />
+<path class="sockzone" d="M -17.10,46.98 A 50.0 50.0 0 0 0 21.13,45.32" />
+<circle class="led" cx="30.91" cy="-8.28" r="1.5" />
+<circle class="led" cx="22.63" cy="-22.63" r="1.5" />
+<circle class="led" cx="8.28" cy="-30.91" r="1.5" />
+<circle class="led" cx="-8.28" cy="-30.91" r="1.5" />
+<circle class="led" cx="-22.63" cy="-22.63" r="1.5" />
+<circle class="led" cx="-30.91" cy="-8.28" r="1.5" />
+<circle class="led" cx="-30.91" cy="8.28" r="1.5" />
+<circle class="led" cx="-22.63" cy="22.63" r="1.5" />
+<circle class="led" cx="-8.28" cy="30.91" r="1.5" />
+<circle class="led" cx="8.28" cy="30.91" r="1.5" />
+<circle class="led" cx="22.63" cy="22.63" r="1.5" />
+<circle class="led" cx="30.91" cy="8.28" r="1.5" />
+<circle class="mic" cx="33" cy="-32" r="2.4" />
+<circle class="mic" cx="-33" cy="-32" r="2.4" />
+<circle class="mic" cx="33" cy="34" r="2.4" />
+<circle class="mic" cx="-33" cy="34" r="2.4" />
+<rect class="pi" x="-42.5" y="-28.0" width="85.0" height="56.0" rx="1.5" />
+<circle class="stand" cx="-39" cy="-24.5" r="3" />
+<circle class="standhole" cx="-39" cy="-24.5" r="1.2" />
+<circle class="stand" cx="-39" cy="24.5" r="3" />
+<circle class="standhole" cx="-39" cy="24.5" r="1.2" />
+<circle class="stand" cx="19" cy="-24.5" r="3" />
+<circle class="standhole" cx="19" cy="-24.5" r="1.2" />
+<circle class="stand" cx="19" cy="24.5" r="3" />
+<circle class="standhole" cx="19" cy="24.5" r="1.2" />
+<rect class="pwr" x="-39" y="28" width="9" height="3.2" />
+<rect class="port" x="-24.5" y="28" width="7.5" height="3.2" />
+<rect class="port" x="-11" y="28" width="7.5" height="3.2" />
+<rect class="port" x="8" y="28" width="6" height="3.2" />
+<rect class="port" x="42.5" y="10.0" width="3.2" height="16" />
+<rect class="usb3" x="42.5" y="-8.5" width="3.2" height="16" />
+<rect class="port" x="42.5" y="-26.5" width="3.2" height="16" />
+    
+  <!-- the three leads -->
+  <rect class="plugbody pwr-s" x="-39" y="28" width="9" height="26" rx="1"/>
+  <path class="lead pwr-s" d="M -34.5,92 L -34.5,55"/>
+  <path class="leadhead pwr-s" d="M -34.5,52 l -2.6,5 l 5.2,0 z"/>
+
+  <rect class="plugbody data-s" x="45.7" y="-7.5" width="20" height="14" rx="1"/>
+  <path class="lead data-s" d="M 65.7,-0.5 C 56,16 44,16 34,24 S 16,44 8.3,48.4"/>
+  <path class="leadhead data-s" d="M 6.96,49.51 l 1.0,-5.6 l 3.9,4.0 z"/>
+
+  <path class="lead audio-s" d="M -6.96,49.51 C -2,62 2,76 6,92"/>
+  <path class="leadhead audio-s" d="M 6.6,94.5 l -4.4,-3.4 l 5.6,-1.4 z"/>
+
+    
+  <g class="lbl">
+    <line class="ldr" x1="0" y1="-56" x2="0" y2="-76"/>
+    <text x="0" y="-80" text-anchor="middle">mic array Ø100, above the Pi</text>
+    <line class="ldr" x1="-42" y1="-33" x2="-62" y2="-46"/>
+    <text x="-64" y="-48" text-anchor="end">mic port</text>
+    <line class="ldr" x1="27.7" y1="-16" x2="52" y2="-30"/>
+    <text x="54" y="-32">LED ring, r 32</text>
+    <line class="ldr" x1="-10" y1="-10" x2="-10" y2="18"/>
+    <text x="-10" y="24" text-anchor="middle" class="strong">Raspberry Pi 4</text>
+    <text x="-10" y="31" text-anchor="middle" class="dim">85 × 56, on four standoffs</text>
+    <line class="ldr" x1="0" y1="62" x2="0" y2="82"/>
+    <text x="0" y="88" text-anchor="middle" class="strong">rear opening · 230°–302°</text>
+    <line class="ldr" x1="47.8" y1="47.8" x2="66" y2="70"/>
+    <text x="68" y="73">column + screw, 315°</text>
+    <line class="ldr" x1="-44" y1="0" x2="-72" y2="-8"/>
+    <text x="-74" y="-10" text-anchor="end">column, 180°</text>
+    <text x="-74" y="-3" text-anchor="end" class="dim">moved off 225° and 200°</text>
+    <line class="ldr" x1="55" y1="-0.5" x2="80" y2="-24"/>
+    <text x="82" y="-26">USB 3.0 — use this pair</text>
+    <text x="82" y="-19" class="dim">23.1 mm to the wall</text>
+    <line class="ldr" x1="68" y1="14" x2="86" y2="34"/>
+    <text x="88" y="36" class="strong">port doorway · 335°–25°</text>
+    <text x="88" y="43" class="dim">Ethernet and four USB, left open</text>
+  </g>
+
+    
+  <g class="lbl">
+    <text x="-38" y="99" text-anchor="middle" class="pwr-t">power in</text>
+    <text x="14" y="99" class="audio-t">audio out</text>
+    <text x="30" y="14" class="data-t">array lead — over the Pi</text>
+  </g>
+
+  </svg>
+  </div>
+  <figcaption>The Pi can only go in one way — its mounting holes are not centred on the
+  board, so the pattern only fits at one rotation. That puts <b>power and HDMI facing the rear
+  opening</b> and the USB stack facing right. The four grey wedges are the columns: they carry
+  the array on a shelf at 34.9 mm and take the lid screws. They also cut the outer ring into
+  four compartments, which is why the array lead crosses <b>over the Pi</b> rather than round
+  the outside. The second doorway on the right is not needed to build the thing — it is
+  there so <b>Ethernet and the USB ports stay reachable</b> without unscrewing the lid.
+  Both doorways run from 5 mm to the rim rather than stopping short of it: a window with
+  wall above it would need the printer to bridge sixty millimetres unsupported.</figcaption>
+</figure>
+
+<h2>Section — the stack, cut through the opening</h2>
+<figure>
+  <div class="figscroll">
+  <svg viewBox="-100 -2 200 58" role="img"
+       aria-label="Cross-section showing the height stack: floor, standoffs, Raspberry Pi, a nine millimetre gap for cables, the mic array, and the lid, totalling 42.6 mm.">
+    
+  <g class="sec">
+    <rect class="floor" x="-70" y="44.00" width="140" height="2"/>
+    <rect class="wallsec" x="-70" y="41.00" width="2.4" height="5"/>
+    <rect class="wallsec" x="67.6" y="9.90" width="2.4" height="36.1"/>
+    <rect class="shelfsec" x="-67.6" y="11.10" width="23.6" height="34.9"/>
+    <rect class="shelfsec" x="44" y="11.10" width="23.6" height="34.9"/>
+    <rect class="colsec" x="-67.6" y="5.90" width="17.1" height="5.2"/>
+    <rect class="colsec" x="50.5" y="5.90" width="17.1" height="5.2"/>
+    <rect class="stand" x="-27.5" y="39.00" width="6" height="5"/>
+    <rect class="stand" x="21.5" y="39.00" width="6" height="5"/>
+    <rect class="pisec" x="-28" y="37.60" width="56" height="1.4"/>
+    <rect class="pitall" x="-28" y="20.10" width="56" height="17.5"/>
+    <rect class="arraysec" x="-50" y="9.90" width="100" height="1.2"/>
+    <rect class="lidsec" x="-70" y="3.40" width="140" height="2.5"/>
+    <rect class="lidsec" x="-70" y="5.90" width="2.4" height="4"/>
+    <rect class="lidsec" x="67.6" y="5.90" width="2.4" height="4"/>
+    <rect class="foot" x="-60" y="46.00" width="10" height="2" rx="0.6"/>
+    <rect class="foot" x="50" y="46.00" width="10" height="2" rx="0.6"/>
+
+    <path class="lead pwr-s" d="M -92,36.00 L -30,36.00"/>
+    <path class="lead audio-s" d="M -92,14.00 L -46,14.00 C -20,13.00 -10,12.00 -4,11.40"/>
+    <path class="lead data-s" d="M 30,26.00 C 42,22.00 30,15.00 12,12.40"/>
+
+    <g class="lbl">
+      <text x="-92" y="33.00" class="pwr-t">power, straight in</text>
+      <text x="-92" y="11.00" class="audio-t">audio out</text>
+      <text x="46" y="29.00" class="data-t">array lead</text>
+      <text x="0" y="30.00" text-anchor="middle" class="dim">Pi ports, 17.5 tall</text>
+      <text x="0" y="16.00" text-anchor="middle" class="dim">9 mm — the cable runs through here</text>
+      <text x="0" y="8.00" text-anchor="middle" class="strong">mic array, LEDs up</text>
+      <text x="0" y="2.40" text-anchor="middle" class="strong">lid</text>
+      <text x="-62" y="49.60" class="dim">feet — the air intake</text>
+    </g>
+    <line class="dimline" x1="80" y1="46.00" x2="80" y2="3.40"/>
+    <line class="ldr" x1="72" y1="46.00" x2="83" y2="46.00"/>
+    <line class="ldr" x1="72" y1="3.40" x2="83" y2="3.40"/>
+    <text x="86" y="26.00" class="dimtext">42.6</text>
+  </g>
+
+  </svg>
+  </div>
+  <figcaption>Left is the opening side. The power lead goes <b>straight in</b> — no adapter,
+  no bend — because the wall is simply absent from 5 mm upward. The 9 mm between the top of
+  the Pi's ports and the underside of the array is the corridor every internal cable uses.
+  Total height 42.6 mm, on feet that lift it 2 mm clear.</figcaption>
+</figure>
+
+<h2>The three leads</h2>
+<figure>
+  <table>
+    <thead><tr><th>Lead</th><th>From</th><th>To</th><th>Route</th></tr></thead>
+    <tbody>
+      <tr>
+        <td><span class="swatch" style="background:var(--pwr)"></span>Power</td>
+        <td>wall adapter</td><td>Pi USB‑C</td>
+        <td>In through the opening, straight into the socket. <span class="mono">30.1 mm</span> of run against about 26 needed.</td>
+      </tr>
+      <tr>
+        <td><span class="swatch" style="background:var(--data)"></span>Array lead</td>
+        <td>Pi USB 3.0<br><span class="mono">the blue pair</span></td><td>array USB‑C</td>
+        <td>Never leaves the case. Out of the port, over the Pi, up to the array's socket. <span class="mono">23.1 mm</span> against about 20.</td>
+      </tr>
+      <tr>
+        <td><span class="swatch" style="background:var(--audio)"></span>Audio</td>
+        <td>array 3.5 mm</td><td>the speaker</td>
+        <td>Drops off the array's rim and straight out of the opening.</td>
+      </tr>
+    </tbody>
+  </table>
+</figure>
+
+<div class="note">
+  <h3>Two ways to get it wrong</h3>
+  <p><b>The array goes LEDs up.</b> The face with the XMOS chip, the 2 × 12 header field and
+  the white JST connector is the bottom. Upside down, the lid stands proud on the JST and the
+  microphones aim into the Pi.</p>
+  <p><b>Use the blue USB 3.0 ports for the array lead.</b> They have 23.1 mm to the wall. The
+  outer pair has 20.5, which a plug will just about make and nothing more — and both are
+  measured to a wall that is now a doorway anyway, so a plug that overshoots simply pokes
+  out of it.</p>
+</div>
+</div>

@@ -1,0 +1,13 @@
+# {{ ansible_managed }}
+[Unit]
+Description=Keep Wi-Fi power saving off on {{ gmk_iface }} (jasbros)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/sbin/iw dev {{ gmk_iface }} set power_save off
+RemainAfterExit=true
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,15 @@
+# {{ ansible_managed }}
+# k3s on gmk. See docs/gmk.md.
+node-ip: "{{ ansible_facts.default_ipv4.address }}"
+flannel-iface: "{{ gmk_iface }}"
+tls-san:
+  - "{{ ansible_facts.hostname }}"
+  - "{{ ansible_facts.default_ipv4.address }}"
+# Readable by `normal`, so ./jasbros gmk kubeconfig needs no sudo.
+write-kubeconfig-mode: "0640"
+write-kubeconfig-group: "{{ ansible_user }}"
+kubelet-arg:
+  - "system-reserved={{ k3s_system_reserved }}"
+  - "kube-reserved={{ k3s_kube_reserved }}"
+# No cluster-init: the default SQLite datastore survives an IP change,
+# where embedded etcd would not.

@@ -1,0 +1,52 @@
+# Claude Speaker — dependencies
+#
+# Install with:
+#   python3 -m venv .venv
+#   source .venv/bin/activate
+#   pip install -r requirements.txt
+
+# Talking to Claude
+anthropic>=0.40.0
+
+# Reading the API key out of .env
+python-dotenv>=1.0.0
+
+# Microphone input
+sounddevice>=0.4.6
+numpy>=1.24.0
+
+# Speech to text (runs locally, no internet needed after the first download)
+faster-whisper>=1.0.0
+
+# Wake word detection (runs locally). Optional — without it the speaker
+# falls back to push-to-talk, which works fine.
+#
+# On Linux it's installed separately by start.sh, without its dependencies.
+# openWakeWord declares tflite-runtime as a hard requirement there, and
+# tflite-runtime has no wheel for recent Pythons on Arm — so on a Raspberry
+# Pi this one line fails the whole install. We never use it anyway: wake.py
+# asks for the ONNX build. Its real dependencies are the four below.
+openwakeword>=0.6.0; sys_platform != "linux"
+onnxruntime>=1.10.0,<2
+scikit-learn>=1,<2
+scipy>=1.3,<2
+tqdm>=4,<5
+
+# Today's weather, from Open-Meteo — free, no API key. Only used when
+# LOCATION is set in .env.
+requests>=2.31.0
+
+# The voice, on Linux only. macOS has `say` built in and doesn't need this;
+# the Raspberry Pi has nothing, so it speaks with Piper. About 63 MB per
+# voice, downloaded the first time it talks.
+piper-tts>=1.7.0; sys_platform == "linux"
+
+# Talks to the LED ring on the reSpeaker microphone array, over USB. Only
+# used on the Pi; on a laptop it finds no array and the lights stay off.
+pyusb
+
+# Decodes the ogg, mp3 and flac that sound-effect libraries hand back.
+soundfile
+
+# Archives the wake-word data and ties each model to the version it used.
+huggingface_hub

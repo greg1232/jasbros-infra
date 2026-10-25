@@ -1,0 +1,8 @@
+# The CLI's virtualenv, made by ./jasbros
+.venv/
+__pycache__/
+*.pyc
+*.egg-info/
+
+# macOS
+.DS_Store

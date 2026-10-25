@@ -1,0 +1,16 @@
+[project]
+name = "jasbros-cli"
+version = "0.1.0"
+description = "The ./jasbros command for the jasbros platform"
+requires-python = ">=3.12"
+dependencies = [
+    "ansible-core>=2.21,<2.22",
+    "pyyaml>=6",
+]
+
+[build-system]
+requires = ["setuptools>=69"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+packages = ["jasbros_cli"]

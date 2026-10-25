@@ -1,0 +1,5 @@
+- name: Turn Wi-Fi power saving off
+  ansible.builtin.systemd_service:
+    name: jasbros-wifi-powersave-off.service
+    state: restarted
+  ignore_errors: "{{ ansible_check_mode }}"

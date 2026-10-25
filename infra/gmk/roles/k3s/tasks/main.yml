@@ -1,0 +1,78 @@
+# The node's address is read from the host on every run, never written
+# down (docs/overview.md D11). If gmk has moved, this run moves k3s with it.
+
+- name: Read the current k3s config
+  ansible.builtin.slurp:
+    src: /etc/rancher/k3s/config.yaml
+  register: k3s_old_config
+  failed_when: false
+
+- name: Say loudly if gmk's address has changed
+  ansible.builtin.debug:
+    msg: >-
+      GMK HAS MOVED: k3s was configured for {{ old_ip }} and gmk is now at
+      {{ ansible_facts.default_ipv4.address }}. This run reconfigures k3s; then
+      ./jasbros gmk kubeconfig points the laptop at the new address.
+  vars:
+    old_ip: "{{ (k3s_old_config.content | b64decode | from_yaml)['node-ip'] }}"
+  when:
+    - k3s_old_config.content is defined
+    - old_ip != ansible_facts.default_ipv4.address
+
+- name: Make k3s's config directory, before k3s exists to make it
+  ansible.builtin.file:
+    path: /etc/rancher/k3s
+    state: directory
+    mode: "0755"
+
+- name: Write the k3s config
+  ansible.builtin.template:
+    src: config.yaml.j2
+    dest: /etc/rancher/k3s/config.yaml
+    # Readable by everyone: `kubectl` on gmk reads it too, and it holds no
+    # secrets — the token and certificates live elsewhere.
+    mode: "0644"
+  notify: Restart k3s
+
+- name: Which k3s is installed
+  ansible.builtin.command: /usr/local/bin/k3s --version
+  register: k3s_installed
+  changed_when: false
+  failed_when: false
+  check_mode: false
+
+- name: Fetch the k3s installer
+  ansible.builtin.get_url:
+    url: https://get.k3s.io
+    dest: /usr/local/sbin/k3s-install.sh
+    mode: "0755"
+  when: k3s_version not in (k3s_installed.stdout | default(''))
+
+- name: Install k3s {{ k3s_version }}
+  ansible.builtin.command: /usr/local/sbin/k3s-install.sh
+  environment:
+    INSTALL_K3S_VERSION: "{{ k3s_version }}"
+  when: k3s_version not in (k3s_installed.stdout | default(''))
+  changed_when: true
+
+- name: k3s runs, and starts at boot
+  ansible.builtin.systemd_service:
+    name: k3s
+    state: started
+    enabled: true
+  # In a dry run k3s was never installed, so there is nothing to start.
+  when: not ansible_check_mode or k3s_installed.rc == 0
+
+- name: Restart k3s now if its config changed
+  ansible.builtin.meta: flush_handlers
+
+- name: Wait for the node to be Ready
+  ansible.builtin.command: >-
+    /usr/local/bin/k3s kubectl wait --for=condition=Ready
+    node/{{ ansible_facts.hostname }} --timeout=300s
+  register: k3s_ready
+  retries: 10
+  delay: 10
+  until: k3s_ready.rc == 0
+  changed_when: false
+  when: not ansible_check_mode

@@ -1,0 +1,19 @@
+# helm on gmk too, so a deploy can still happen from gmk itself if the
+# laptop is away. The laptop's own helm is what ./jasbros uses.
+
+- name: Which helm is installed
+  ansible.builtin.command: /usr/local/bin/helm version --short
+  register: helm_installed
+  changed_when: false
+  failed_when: false
+  check_mode: false
+
+- name: Install helm {{ helm_version }}
+  ansible.builtin.unarchive:
+    src: "https://get.helm.sh/helm-{{ helm_version }}-linux-amd64.tar.gz"
+    dest: /usr/local/bin
+    remote_src: true
+    include: [linux-amd64/helm]
+    extra_opts: [--strip-components=1]
+    mode: "0755"
+  when: helm_version not in (helm_installed.stdout | default(''))

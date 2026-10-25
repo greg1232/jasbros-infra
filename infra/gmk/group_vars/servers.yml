@@ -1,0 +1,24 @@
+# Settings for gmk. See docs/gmk.md for why each one is what it is.
+
+# Grow / to this, and leave the rest of the volume group free. Only ever
+# grows; a smaller number than the current size does nothing.
+gmk_root_size: 200g
+
+# The Wi-Fi interface k3s talks over. gmk has no cable plugged in.
+gmk_iface: wlp3s0
+
+# Pinned. Upgrades happen only when these change. The kubectl minor
+# version in cli/jasbros_cli/doctor.py follows k3s_version.
+k3s_version: v1.36.5+k3s1
+helm_version: v4.3.1
+
+# What k3s keeps back for the OS and itself; jobs get the rest.
+# This leaves 7 CPUs / ~13 GiB. The display role (docs/display.md) will
+# raise system-reserved to cpu=1,memory=2Gi for the desktop.
+k3s_system_reserved: cpu=500m,memory=1Gi
+k3s_kube_reserved: cpu=500m,memory=1Gi
+
+# Ubuntu 25.10+ makes sudo-rs the system sudo, and Ansible times out
+# waiting for its password prompt. The original sudo is still installed
+# beside it as sudo.ws, so Ansible uses that and the system default stays.
+ansible_become_exe: sudo.ws
