@@ -75,6 +75,15 @@ ARRIVAL = (
     "a birdhouse, a post, a scarecrow, a shadow.\n"
     "- animals: how many real animals (dogs, cats) are in the picture.")
 
+RECOUNT = "One picture from the candy camera.\n" + COUNT
+
+COUNT_SCHEMA = {
+    "type": "object",
+    "properties": {"candies": {"type": "integer"},
+                   "blocked": {"type": "boolean"}},
+    "required": ["candies", "blocked"],
+    "additionalProperties": False,
+}
 ARRIVAL_SCHEMA = {
     "type": "object",
     "properties": {"costume": {"type": "string"},
