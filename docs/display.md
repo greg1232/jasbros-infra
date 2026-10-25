@@ -1,5 +1,24 @@
 # gmk display — a standard desktop with a browser
 
+**Built and running (2026-10-25):** the `display` role in `infra/gmk/roles/display`.
+The voice switching described below (display-agent, the speaker's screen
+tool) is **not built yet**.
+
+## Using it with a keyboard
+
+Firefox runs in **kiosk mode**: the whole screen, no address bar or tabs.
+Links on the page work, and so does Alt+← to go back.
+
+| | |
+|---|---|
+| **Super** (Windows key) | GNOME's Activities overview, on top of the kiosk: open other apps, a normal Firefox window, a terminal |
+| **Alt+F4** | close the kiosk Firefox, leaving the ordinary desktop |
+| F11, Esc | do nothing in kiosk mode |
+| log out and in, or reboot | the kiosk comes back, and waits for the dashboard to answer first |
+
+`display_fullscreen: false` in `infra/gmk/group_vars/servers.yml` gives an
+ordinary window instead.
+
 The monitor plugged into gmk shows an ordinary Ubuntu desktop, logged in,
 with a web browser open on the app. It's the normal stock stack: GNOME,
 GDM, Firefox. Nothing on the screen is custom. The apps run in Kubernetes as
@@ -56,20 +75,27 @@ The desktop logs in as a dedicated user, **`display`**, and not as `normal`:
 [Desktop Entry]
 Type=Application
 Name=jasbros
-Exec=firefox --remote-debugging-port=9222 --new-window http://localhost/speakers
+Exec=sh -c 'until curl -sf -o /dev/null --max-time 3 http://localhost/speakers; do sleep 3; done; exec firefox --kiosk http://localhost/speakers'
 X-GNOME-Autostart-enabled=true
 ```
 
 - **`http://localhost/...`**: Traefik listens on the node itself, so the URL
   works whatever LAN address gmk has today (D11).
-- An ordinary window, not kiosk mode. Press F11 for full screen, or set
-  `display_fullscreen: true` to add `--kiosk` to the line.
+- **Kiosk mode** (`--kiosk`), since an ordinary window wasn't full screen,
+  and Firefox has no supported way to start in F11 full screen.
+- **It waits for the dashboard first.** The autostart line runs
+  `until curl -sf <url>; do sleep 3; done; exec firefox …`. GNOME logs in
+  before k3s is ready on every boot, and Firefox's error page never retries,
+  so without the wait the screen came up blank.
 - The start page is an Ansible variable, `display_url`, and its default is the
   fleet dashboard. This is only where the browser *starts*. Changing it from
   minute to minute is what clicking and voice are for.
-- `--remote-debugging-port=9222` lets the display agent (below) steer the
-  browser. Firefox only listens on `127.0.0.1` for this, so it's not
-  reachable from the network.
+- When voice switching is built, `--remote-debugging-port=9222` gets added
+  so the display agent (below) can steer the browser. Firefox only listens
+  on `127.0.0.1` for that.
+- Firefox's enterprise policies (`/etc/firefox/policies/policies.json`,
+  which the snap reads) make the dashboard the home page and turn off the
+  first-run, what's-new and default-browser pages.
 - Firefox's own session restore handles a crash. If someone closes the
   window, logging out and in (or a reboot) opens it again.
 
@@ -182,6 +208,24 @@ def show_on_screen(place: str = "", url: str = "") -> str:
   background thread scans `192.168.4.0/22` for `:8090/whoami` answering
   `"name": "gmk"`. The new address is saved in `state/` for next time.
 - It never raises, and it returns a sentence, per the tool rules.
+
+## What the desktop did to the server, and the fixes
+
+Installing `ubuntu-desktop-minimal` broke two things that worked before.
+Both fixes are in the roles, so a fresh gmk gets them from the first run.
+
+- **NetworkManager adopted k3s's interfaces** (`cni0`, `flannel.1`, every
+  pod's `veth`) and took `cni0` down, which cut off every pod. The dashboard,
+  CoreDNS and Traefik all failed. Fix: `/etc/NetworkManager/conf.d/90-jasbros-k3s.conf`
+  marks them unmanaged (k3s role).
+- **NetworkManager took the Wi-Fi too.** The desktop ships
+  `/usr/lib/netplan/00-network-manager-all.yaml`, which hands all
+  networking to NetworkManager. After the next reboot, gmk got a different
+  DHCP lease (`.109`), and NetworkManager's defaults turn Wi-Fi power
+  saving back on. Fix: `/etc/netplan/90-jasbros-networkd.yaml` sets
+  `renderer: networkd` again (base role), and gmk came back at `.108`. The
+  same file marks the cable port `enp2s0` `optional`, which took boot from
+  2 min 17 s to 18 s.
 
 ## Cost
 

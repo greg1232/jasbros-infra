@@ -46,6 +46,9 @@ def ansible_env() -> dict:
     env = dict(os.environ)
     env["ANSIBLE_CONFIG"] = str(GMK / "ansible.cfg")
     env["ANSIBLE_COLLECTIONS_PATH"] = str(VENV / "collections")
+    # Ansible is Python: piped to a file it holds its output back, so a log
+    # being watched looks stuck on the step before the one actually running.
+    env["PYTHONUNBUFFERED"] = "1"
     return env
 
 

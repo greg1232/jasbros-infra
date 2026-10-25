@@ -1,0 +1,9 @@
+# {{ ansible_managed }}
+[Desktop Entry]
+Type=Application
+Name=jasbros
+Comment=Open the dashboard on gmk's screen
+# Wait for the dashboard to answer first: GNOME logs in before k3s is
+# ready on every boot, and Firefox's error page never tries again.
+Exec=sh -c 'until curl -sf -o /dev/null --max-time 3 {{ display_url }}; do sleep 3; done; exec firefox {{ '--kiosk' if display_fullscreen else '--new-window' }} {{ display_url }}'
+X-GNOME-Autostart-enabled=true

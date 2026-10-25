@@ -13,12 +13,19 @@ k3s_version: v1.36.5+k3s1
 helm_version: v4.3.1
 
 # What k3s keeps back for the OS and itself; jobs get the rest.
-# This leaves 7 CPUs / ~13 GiB. The display role (docs/display.md) will
-# raise system-reserved to cpu=1,memory=2Gi for the desktop.
-k3s_system_reserved: cpu=500m,memory=1Gi
+# system-reserved includes the desktop on gmk's screen (docs/display.md),
+# which leaves 6.5 CPUs / ~12 GiB.
+k3s_system_reserved: cpu=1,memory=2Gi
 k3s_kube_reserved: cpu=500m,memory=1Gi
 
 # Ubuntu 25.10+ makes sudo-rs the system sudo, and Ansible times out
 # waiting for its password prompt. The original sudo is still installed
 # beside it as sudo.ws, so Ansible uses that and the system default stays.
 ansible_become_exe: sudo.ws
+
+# gmk's screen (docs/display.md): who is logged in, and what Firefox opens.
+display_user: display
+display_url: http://localhost/speakers
+# Firefox's kiosk mode: the whole screen, no address bar or tabs. Links on
+# the page still work. false gives an ordinary window.
+display_fullscreen: true

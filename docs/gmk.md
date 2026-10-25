@@ -33,6 +33,11 @@ group. The roles run in order, and each can be run alone with `--tags`.
 - sysctls Kubernetes wants: `net.ipv4.ip_forward=1`,
   `net.bridge.bridge-nf-call-iptables=1`, `fs.inotify.max_user_instances=512`.
 - Kernel modules `br_netfilter`, `overlay`, loaded now and at boot.
+- **systemd-networkd runs the network**, not NetworkManager:
+  `/etc/netplan/90-jasbros-networkd.yaml` sets `renderer: networkd`, which
+  overrides the desktop's netplan file. It also marks `enp2s0` (no cable)
+  `optional`, so boot doesn't wait 2 minutes for it. It takes effect at the
+  next boot, and is never applied live over the only link.
 - **Wi-Fi power save off** on `wlp3s0`. A server that naps its radio drops
   kubectl connections and dashboard polls. gmk uses systemd-networkd, not
   NetworkManager, so this is done two ways: a oneshot unit runs `iw ... set
@@ -45,6 +50,9 @@ group. The roles run in order, and each can be run alone with `--tags`.
   traffic inside the cluster isn't dropped. Default deny incoming.
 
 ### `k3s`
+- `/etc/NetworkManager/conf.d/90-jasbros-k3s.conf` keeps NetworkManager
+  (which comes with the desktop) off `cni0`, `flannel*`, and `veth*`. Without
+  it, every pod lost its network. See [display.md](display.md).
 - Installs a **pinned** k3s version (`k3s_version` in `group_vars`) using the
   official install script with `INSTALL_K3S_VERSION`. Upgrades only happen
   when that variable changes.

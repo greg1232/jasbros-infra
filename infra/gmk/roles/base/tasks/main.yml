@@ -80,6 +80,35 @@
       fs.inotify.max_user_instances: 512
       fs.inotify.max_user_watches: 524288
 
+# --- Who runs the network: systemd-networkd, as on any Ubuntu server.
+# A desktop (the display role) ships /usr/lib/netplan/00-network-manager-all.yaml,
+# which hands everything to NetworkManager. On gmk that put two managers on
+# the Wi-Fi, a new DHCP lease and a new address after the next boot, and
+# NetworkManager's own default turns Wi-Fi power saving back on. A later
+# netplan file wins, so this one gives it back. Takes effect at the next boot:
+# applying network config live over the only link is how a box gets lost.
+- name: Keep systemd-networkd in charge of the network
+  ansible.builtin.copy:
+    dest: /etc/netplan/90-jasbros-networkd.yaml
+    content: |
+      # Managed by jasbros — infra/gmk/roles/base
+      network:
+        version: 2
+        renderer: networkd
+        ethernets:
+          # No cable in it. Without this, every boot waits two minutes for
+          # it to come up before anything that needs the network starts.
+          enp2s0:
+            optional: true
+    mode: "0600"
+  register: netplan_renderer
+
+- name: Network change waiting for a reboot
+  ansible.builtin.debug:
+    msg: "gmk's network manager changes at the next boot, and it may come back
+      at a different address: ./jasbros gmk find --update"
+  when: netplan_renderer is changed
+
 # --- Wi-Fi: a radio that naps drops kubectl and dashboard polls.
 
 - name: Keep Wi-Fi power saving off

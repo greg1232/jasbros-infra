@@ -60,6 +60,9 @@ Rules:
   and refuses the file unless it's `chmod 600`. Without the file, it prompts
   (`--ask-become-pass`). Passwordless sudo is never
   turned on behind anyone's back.
+- **Long installs show progress.** `gmk provision` follows gmk's
+  `/var/log/dpkg.log` over SSH and prints each package as it's unpacked
+  and set up (`[gmk apt] …`). `--quiet` turns that off.
 - **Find it again when it moves.** If a host doesn't answer at its inventory
   address, the CLI says so and suggests `find`/`scan --update`. It doesn't
   rescan quietly on its own, because a 1,000-address scan shouldn't be a

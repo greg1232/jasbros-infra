@@ -1,0 +1,181 @@
+# gmk's monitor: a standard Ubuntu desktop, logged in, with Firefox open on
+# the fleet dashboard. See docs/display.md.
+
+- name: Install the desktop and Firefox
+  ansible.builtin.apt:
+    name: [ubuntu-desktop-minimal, firefox]
+    state: present
+
+# --- who is logged in on the screen
+
+- name: The display user — no sudo, no password, no cluster
+  ansible.builtin.user:
+    name: "{{ display_user }}"
+    comment: gmk's screen
+    shell: /bin/bash
+    password: "!"
+    groups: []
+    append: false
+
+- name: Keep the display user off SSH
+  ansible.builtin.copy:
+    dest: /etc/ssh/sshd_config.d/jasbros-display.conf
+    content: |
+      # Managed by jasbros — infra/gmk/roles/display
+      # This account exists only for the screen.
+      DenyUsers {{ display_user }}
+    mode: "0644"
+    validate: /usr/sbin/sshd -t -f %s
+  notify: Reload ssh
+
+- name: Log the display user in at boot
+  community.general.ini_file:
+    path: /etc/gdm3/custom.conf
+    section: daemon
+    option: "{{ item.key }}"
+    value: "{{ item.value }}"
+    no_extra_spaces: true
+    mode: "0644"
+  loop:
+    - { key: AutomaticLoginEnable, value: "true" }
+    - { key: AutomaticLogin, value: "{{ display_user }}" }
+
+# One at a time and owned by the user: a ~/.config made by root as a side
+# effect of making something inside it is a GNOME that can't save anything.
+- name: Make ~/.config and ~/.config/autostart
+  ansible.builtin.file:
+    path: "/home/{{ display_user }}/{{ item }}"
+    state: directory
+    owner: "{{ display_user }}"
+    group: "{{ display_user }}"
+    mode: "0755"
+  loop: [.config, .config/autostart]
+
+- name: Skip GNOME's first-login welcome
+  ansible.builtin.copy:
+    dest: "/home/{{ display_user }}/.config/gnome-initial-setup-done"
+    content: "yes"
+    owner: "{{ display_user }}"
+    group: "{{ display_user }}"
+    mode: "0644"
+
+# --- the browser
+
+- name: Open Firefox on the dashboard at login
+  ansible.builtin.template:
+    src: jasbros-browser.desktop.j2
+    dest: "/home/{{ display_user }}/.config/autostart/jasbros-browser.desktop"
+    owner: "{{ display_user }}"
+    group: "{{ display_user }}"
+    mode: "0644"
+
+- name: Make Firefox's policies folder
+  ansible.builtin.file:
+    path: /etc/firefox/policies
+    state: directory
+    mode: "0755"
+
+# Firefox's own enterprise policies, which the snap reads from /etc/firefox:
+# the dashboard is home, and no first-run or what's-new pages cover it.
+- name: Firefox policies
+  ansible.builtin.copy:
+    dest: /etc/firefox/policies/policies.json
+    content: "{{ firefox_policies | to_nice_json }}\n"
+    mode: "0644"
+  vars:
+    firefox_policies:
+      policies:
+        Homepage: { URL: "{{ display_url }}", StartPage: homepage }
+        OverrideFirstRunPage: ""
+        OverridePostUpdatePage: ""
+        DontCheckDefaultBrowser: true
+        DisableTelemetry: true
+        UserMessaging:
+          WhatsNew: false
+          ExtensionRecommendations: false
+          FeatureRecommendations: false
+          SkipOnboarding: true
+          MoreFromMozilla: false
+
+# --- never lock, never blank, never sleep: gmk is a Kubernetes node first
+
+- name: A dconf profile that reads the system defaults
+  ansible.builtin.copy:
+    dest: /etc/dconf/profile/user
+    content: |
+      user-db:user
+      system-db:local
+    mode: "0644"
+  notify: Update dconf
+
+- name: Make the dconf folders
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    mode: "0755"
+  loop: [/etc/dconf/db/local.d, /etc/dconf/db/local.d/locks]
+
+- name: No lock, no blank, no suspend
+  ansible.builtin.copy:
+    dest: /etc/dconf/db/local.d/00-jasbros
+    content: |
+      # Managed by jasbros — infra/gmk/roles/display
+      [org/gnome/desktop/session]
+      idle-delay=uint32 0
+
+      [org/gnome/desktop/screensaver]
+      lock-enabled=false
+
+      [org/gnome/desktop/lockdown]
+      disable-lock-screen=true
+
+      [org/gnome/settings-daemon/plugins/power]
+      sleep-inactive-ac-type='nothing'
+      sleep-inactive-battery-type='nothing'
+      idle-dim=false
+    mode: "0644"
+  notify: Update dconf
+
+- name: ...and locked, so Settings can't turn them back on
+  ansible.builtin.copy:
+    dest: /etc/dconf/db/local.d/locks/00-jasbros
+    content: |
+      /org/gnome/desktop/session/idle-delay
+      /org/gnome/desktop/screensaver/lock-enabled
+      /org/gnome/desktop/lockdown/disable-lock-screen
+      /org/gnome/settings-daemon/plugins/power/sleep-inactive-ac-type
+      /org/gnome/settings-daemon/plugins/power/sleep-inactive-battery-type
+      /org/gnome/settings-daemon/plugins/power/idle-dim
+    mode: "0644"
+  notify: Update dconf
+
+- name: Nothing can suspend gmk, not even the power menu
+  ansible.builtin.systemd_service:
+    name: "{{ item }}"
+    masked: true
+  loop: [sleep.target, suspend.target, hibernate.target, hybrid-sleep.target]
+
+# --- and up it comes. GDM takes the screen from the text console on tty1.
+
+- name: Apply settings before the session starts
+  ansible.builtin.meta: flush_handlers
+
+- name: Which target gmk boots to
+  ansible.builtin.command: systemctl get-default
+  register: default_target
+  changed_when: false
+  check_mode: false
+
+- name: Boot to the desktop
+  ansible.builtin.command: systemctl set-default graphical.target
+  when: default_target.stdout != "graphical.target"
+
+# Not `enabled`: Ubuntu starts GDM at boot through the display-manager.service
+# alias its package sets up, and "enabling" it again is a no-op that systemd
+# reports as a change on every run.
+- name: GDM runs now
+  ansible.builtin.systemd_service:
+    name: gdm
+    state: started
+  # In a dry run the desktop was never installed, so there is no GDM yet.
+  when: not ansible_check_mode

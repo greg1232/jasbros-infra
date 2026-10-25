@@ -1,0 +1,8 @@
+- name: Reload ssh
+  ansible.builtin.systemd_service:
+    name: ssh
+    state: reloaded
+
+- name: Update dconf
+  ansible.builtin.command: dconf update
+  changed_when: true

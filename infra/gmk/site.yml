@@ -10,3 +10,4 @@
     - { role: base, tags: [base] }
     - { role: k3s, tags: [k3s] }
     - { role: helm, tags: [helm] }
+    - { role: display, tags: [display] }

@@ -3,6 +3,7 @@
 import os
 import re
 import subprocess
+import threading
 from pathlib import Path
 
 import yaml
@@ -40,6 +41,41 @@ def _reachable_or_say() -> bool:
     return False
 
 
+def follow_apt(target: str) -> subprocess.Popen:
+    """Print each package gmk installs, while it installs it.
+
+    Ansible says nothing during a step, and installing a desktop is one
+    step that takes ten minutes. dpkg's own log says what it is doing; it
+    is only written to while packages are installed, so the rest of a run
+    stays quiet.
+    """
+    follower = subprocess.Popen(
+        ["ssh", "-n", "-o", "BatchMode=yes", target,
+         "tail -n0 -F /var/log/dpkg.log 2>/dev/null"],
+        # No stdin: ssh would make the terminal's non-blocking, and the
+        # ansible-playbook started after it refuses to run on that.
+        stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
+        stderr=subprocess.DEVNULL, text=True)
+
+    # A big install unpacks everything first, then sets everything up —
+    # and the second half is as long as the first, so both are shown.
+    doing = {"install": "unpack", "upgrade": "upgrade",
+             "configure": "set up", "remove": "remove"}
+
+    def show() -> None:
+        for line in follower.stdout:
+            parts = line.split()
+            # 2026-10-25 19:14:56 install libfoo:amd64 <none> 1.3-3build2
+            # 2026-10-25 19:16:19 configure libfoo:amd64 1.3-3build2 <none>
+            if len(parts) >= 5 and parts[2] in doing:
+                package = parts[3].split(":")[0]
+                print(f"[gmk apt] {parts[1]}  {doing[parts[2]]:7} {package}",
+                      flush=True)
+
+    threading.Thread(target=show, daemon=True).start()
+    return follower
+
+
 def _recap_changed(output: str) -> int:
     return sum(int(n) for n in re.findall(r"\bchanged=(\d+)", output))
 
@@ -58,6 +94,23 @@ def provision(args) -> int:
     if args.verbose:
         command += ["-" + "v" * args.verbose]
 
+    follower = None
+    if not args.check and not args.quiet:
+        name, values = gmk()
+        follower = follow_apt(inventory.target(name, values))
+    try:
+        code = _run_rounds(command, args)
+    finally:
+        if follower:
+            follower.terminate()
+    if code or args.check:
+        return code
+    if not args.tags or "k3s" in args.tags:
+        return kubeconfig(args)
+    return 0
+
+
+def _run_rounds(command: list[str], args) -> int:
     rounds = 2 if args.twice else 1
     for round_ in range(1, rounds + 1):
         if args.twice:
@@ -74,10 +127,6 @@ def provision(args) -> int:
         if args.twice and round_ == 2 and _recap_changed("".join(lines)):
             return fail("the second run changed something — a task is not "
                         "idempotent. Look for 'changed:' above.")
-    if args.check:
-        return 0
-    if not args.tags or "k3s" in args.tags:
-        return kubeconfig(args)
     return 0
 
 
@@ -146,6 +195,8 @@ def add_parser(sub) -> None:
                    help="an Ansible extra var, key=value")
     p.add_argument("--twice", action="store_true",
                    help="run again and fail if the second run changes anything")
+    p.add_argument("--quiet", action="store_true",
+                   help="don't show each package as gmk installs it")
     p.add_argument("-v", "--verbose", action="count", default=0)
     p.set_defaults(func=provision)
 

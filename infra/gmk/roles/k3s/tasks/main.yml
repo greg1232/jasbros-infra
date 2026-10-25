@@ -1,6 +1,9 @@
 # The node's address is read from the host on every run, never written
 # down (docs/overview.md D11). If gmk has moved, this run moves k3s with it.
 
+- name: Which services exist
+  ansible.builtin.service_facts:
+
 - name: Read the current k3s config
   ansible.builtin.slurp:
     src: /etc/rancher/k3s/config.yaml
@@ -33,6 +36,27 @@
     # secrets — the token and certificates live elsewhere.
     mode: "0644"
   notify: Restart k3s
+
+# A desktop brings NetworkManager, which otherwise adopts k3s's bridge, its
+# VXLAN and every pod's veth, takes cni0 down, and cuts every pod off. Written
+# whether or not NetworkManager is there yet, so it's right from its first start.
+- name: Make NetworkManager's config folder
+  ansible.builtin.file:
+    path: /etc/NetworkManager/conf.d
+    state: directory
+    mode: "0755"
+
+- name: Keep NetworkManager's hands off k3s's interfaces
+  ansible.builtin.copy:
+    dest: /etc/NetworkManager/conf.d/90-jasbros-k3s.conf
+    content: |
+      # Managed by jasbros — infra/gmk/roles/k3s
+      [keyfile]
+      unmanaged-devices=interface-name:cni0;interface-name:flannel*;interface-name:veth*
+    mode: "0644"
+  notify:
+    - Restart NetworkManager
+    - Restart k3s
 
 - name: Which k3s is installed
   ansible.builtin.command: /usr/local/bin/k3s --version
