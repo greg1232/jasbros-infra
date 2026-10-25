@@ -58,11 +58,16 @@ ARRIVAL = (
     "A picture from the candy camera, cropped to some people who have just "
     "walked up.\n"
     "- costume: what the people in the picture are dressed as, all of "
-    "them together in at most 8 words, written to follow \"I see you're\" — "
-    "so with its article: \"a scary witch\", \"Darth Vader\", \"a skeleton "
-    "and a pirate\". Empty if they're in everyday clothes or you can't see "
-    "them well enough to tell — never guess.\n"
-    "- people: how many people are in the picture.")
+    "them together, with a vivid detail or two you can actually see — "
+    "colours, accessories, how it's worn, anything funny about it — in at "
+    "most 12 words, written to follow \"I see you're\", article and all: "
+    "\"Darth Vader in cozy plaid pajamas\", \"a witch with a glowing green "
+    "broom\", \"a tiny skeleton and a very tall pirate\". Empty if they're "
+    "in everyday clothes or you can't see them well enough to tell — "
+    "describe only what's there, never guess.\n"
+    "- people: how many real people are in the picture. 0 if it's only "
+    "things that look a bit like a person — a birdhouse, a post, a "
+    "scarecrow, a shadow.")
 
 RECOUNT = "One picture from the candy camera.\n" + COUNT
 
@@ -335,6 +340,9 @@ class Watcher:
                                                    put_back_wait)
         self.background = background or _thread
         self.state = state
+        # Spots Claude has said aren't people (a birdhouse the detector
+        # takes for a person): detections there are dropped from then on.
+        self.ignored: list[list[float]] = []
         self.on = self._load_on()
         self.groups: dict[int, Group] = {}
         self.group_ids = itertools.count(1)
@@ -366,7 +374,8 @@ class Watcher:
         """One frame: JPEG bytes from a snapshot, or a decoded stream frame."""
         found = self.detector.people(small)
         size = _size(small)
-        boxes = [_normal(p["box"], size) for p in found]
+        boxes = [b for b in (_normal(p["box"], size) for p in found)
+                 if not any(_iou(b, spot) >= 0.4 for spot in self.ignored)]
         now = self.clock()
         with self.lock:
             for track in self.tracker.update(boxes, now):
@@ -476,18 +485,42 @@ class Watcher:
 
     def _load_on(self) -> bool:
         try:
-            return bool(json.loads(self.state.read_text()).get("on"))
+            saved = json.loads(self.state.read_text())
         except (OSError, ValueError, AttributeError):
             return False                # off unless it was left on
+        self.ignored = [list(b) for b in saved.get("ignored", [])]
+        return bool(saved.get("on"))
 
     def _save_on(self) -> None:
         if self.state is None:
             return
         try:
             self.state.parent.mkdir(parents=True, exist_ok=True)
-            self.state.write_text(json.dumps({"on": self.on}))
+            self.state.write_text(json.dumps({"on": self.on,
+                                              "ignored": self.ignored}))
         except OSError as error:
             print(f"[candy] couldn't save the switch: {error}", flush=True)
+
+    def forget_ignored(self) -> None:
+        with self.lock:
+            self.ignored = []
+            self._event("forgot the spots that weren't people")
+            self._save_on()
+
+    def _not_people(self, group: Group, boxes: list[list[float]]) -> None:
+        """Claude looked and saw nobody: remember the spot, drop the group."""
+        with self.lock:
+            self.ignored.extend(b for b in boxes if b not in self.ignored)
+            self.groups.pop(group.id, None)
+            if group in self.visit:
+                self.visit.remove(group)
+            for tid in group.tracks:
+                track = self.tracker.tracks.get(tid)
+                if track:
+                    track.group = -1
+            self._event(f"group {group.id} wasn't people — ignoring that "
+                        f"spot from now on")
+            self._save_on()
 
     # -- the questions, to one side
 
@@ -525,9 +558,12 @@ class Watcher:
         return self.eyes.ask([crop(still, around)], ARRIVAL, ARRIVAL_SCHEMA)
 
     def _arrival(self, group: Group) -> None:
+        boxes = self._boxes(group)
         seen = self._look_at(group)
         if not seen:
             return
+        if seen["people"] == 0:
+            return self._not_people(group, boxes)
         with self.lock:
             group.costume = seen["costume"].strip()
             group.kids = max(group.kids, seen["people"])
@@ -544,7 +580,7 @@ class Watcher:
         """Someone joined a group already greeted: no second welcome, but
         see them all, so the parting joke is about everyone."""
         seen = self._look_at(group)
-        if not seen or not seen["costume"].strip():
+        if not seen or not seen["costume"].strip() or seen["people"] == 0:
             return
         with self.lock:
             group.costume = seen["costume"].strip()
@@ -552,6 +588,11 @@ class Watcher:
             self._event(f"group {group.id} now: {group.kids} × "
                         f"{group.costume}")
         self.background(self._fetch_joke, group)
+
+    def _boxes(self, group: Group) -> list[list[float]]:
+        with self.lock:
+            return [list(self.tracker.tracks[t].box) for t in group.tracks
+                    if t in self.tracker.tracks]
 
     def _fetch_joke(self, group: Group) -> None:
         joke = self.eyes.joke(group.costume)
@@ -666,6 +707,7 @@ class Watcher:
         with self.lock:
             return {
                 "on": self.on,
+                "ignored": self.ignored,
                 "people": [{"box": t.box, "id": t.id,
                             "group": t.group if t.group and t.group > 0
                             else None}

@@ -462,6 +462,33 @@ class Switch(unittest.TestCase):
         self.run_frames(w, [person(0.1), person(0.6)], 10)
         self.assertEqual(self.interaction.welcomed, ["a person in a jacket"])
 
+    def test_a_birdhouse_is_learned_and_not_greeted_again(self):
+        w = self.watcher(costumes=[("", 0), ("a tiny astronaut", 1)])
+        w.switch(True)
+        birdhouse = person(0.3, y=0.08, w=0.1, h=0.2)
+        self.run_frames(w, [], 1)
+        self.run_frames(w, [birdhouse], 10)
+        self.assertEqual(self.interaction.welcomed, [])     # not greeted
+        self.assertEqual(len(w.ignored), 1)
+        self.assertEqual(w.status()["groups"], [])
+        self.run_frames(w, [], 6)
+        self.run_frames(w, [birdhouse], 10)                 # back: ignored
+        self.assertEqual([q for q in self.eyes.questions                # no
+                          if q[0] == "arrival"], [("arrival", 1)])   # 2nd look
+        self.run_frames(w, [birdhouse, person(0.7)], 10)    # a real kid
+        self.assertEqual(self.interaction.welcomed, ["a tiny astronaut"])
+
+    def test_ignored_spots_survive_a_restart_and_can_be_forgotten(self):
+        w = self.watcher(costumes=[("", 0)])
+        w.switch(True)
+        self.run_frames(w, [], 1)
+        self.run_frames(w, [person(0.3)], 10)
+        self.assertEqual(len(self.watcher().ignored), 1)
+        again = self.watcher()
+        again.forget_ignored()
+        self.assertEqual(self.watcher().ignored, [])
+        self.assertTrue(self.watcher().on)
+
     def test_the_switch_survives_a_restart(self):
         self.watcher().switch(True)
         self.assertTrue(self.watcher().on)

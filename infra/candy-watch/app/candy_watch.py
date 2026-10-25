@@ -372,6 +372,8 @@ button{font:inherit;padding:.5rem .85rem;border-radius:9px;margin:0 .3rem .3rem 
 button:hover{border-color:var(--pumpkin)}
 #out{color:var(--dim);font-size:.85rem;margin-top:.4rem}
 .box{position:absolute;border:3px solid var(--pumpkin);border-radius:6px}
+.box.ignored{border:2px dashed #8889}
+.box.ignored span{background:#8889}
 .box span{position:absolute;top:-1.5rem;left:-3px;background:var(--pumpkin);
   color:#000;font-size:.75rem;font-weight:700;padding:.05rem .4rem;
   border-radius:4px 4px 4px 0;white-space:nowrap}
@@ -444,6 +446,8 @@ button:hover{border-color:var(--pumpkin)}
         <input id=text maxlength=200 placeholder="Something to say">
         <button onclick="act('api/say', {text:
           document.getElementById('text').value})">Say it</button>
+        <button onclick="act('api/watch', {forget: true})">Forget ignored
+          spots</button>
         <div id=out></div>
       </details>
     </div>
@@ -496,7 +500,10 @@ async function status() {
   const w = d.watch;
   const colours = ['#5bc46b', '#ff8a1f', '#5bc4f0', '#c77dff', '#ffd23f'];
   const colour = g => colours[((g || 1) - 1) % colours.length];
-  $('boxes').innerHTML = !w ? '' : w.people.map(p => {
+  $('boxes').innerHTML = !w ? '' : (w.ignored || []).map(b =>
+    `<div class="box ignored" style="left:${b[0]*100}%;top:${b[1]*100}%;` +
+    `width:${(b[2]-b[0])*100}%;height:${(b[3]-b[1])*100}%">` +
+    `<span>not a person</span></div>`).join('') + w.people.map(p => {
     const [x1, y1, x2, y2] = p.box;
     return `<div class=box style="left:${x1*100}%;top:${y1*100}%;` +
       `width:${(x2-x1)*100}%;height:${(y2-y1)*100}%;` +
@@ -702,6 +709,11 @@ def serve(speaker: Speaker, port: int, here: str = "", clip: Path = CLIP,
                 if watcher is None:
                     return self._json({"ok": False,
                                        "said": "Not watching: no camera."})
+                if body.get("forget"):
+                    watcher.forget_ignored()
+                    return self._json({"ok": True, "speaker": speaker.name,
+                                       "said": "Forgot the spots that "
+                                               "weren't people."})
                 watcher.switch(bool(body.get("on")))
                 return self._json({"ok": True, "on": watcher.on,
                                    "speaker": speaker.name,

@@ -118,6 +118,18 @@ Refilling the box raises the count, and that simply sets a new baseline.
   its time and kind, and shown newest first on the dashboard. The last 500
   are kept in `/data/turns.jsonl` on the pod's volume, so a restart keeps
   them.
+- **Costumes are described** with a vivid visible detail or two, up to 12
+  words ("Darth Vader in cozy plaid pajamas", "a spooky grim reaper with
+  skeleton hands and a pointy-hatted witch"), still only what's actually
+  there. The welcome stays under the speaker's 200 characters.
+- **False positives are learned:** when the costume look finds **no real
+  people** (Claude reports `people: 0` for a birdhouse, a post, a
+  scarecrow), there's no welcome and no joke, and that spot is remembered as
+  "not a person". Detections overlapping it (IoU ≥ 0.4) are dropped before
+  tracking from then on. So each false positive costs one Claude look, once.
+  The spots are kept with the on/off switch on the pod's volume, drawn
+  dashed on the live view, and **Test it → Forget ignored spots** clears
+  them. The front yard's squirrel house was learned 26 s after deploy.
 - **One group, not three:** someone confirmed right beside a group already at
   the box joins it, with no second welcome. Claude looks again so the
   costume and joke cover everyone. A group that has gone by the time
