@@ -64,7 +64,9 @@ Refilling the box raises the count, and that simply sets a new baseline.
 ### Seeing: a small model on gmk decides when Claude looks (built)
 
 ```
- camera ──640×360, ~1.6/s─► YOLOX-nano on gmk ──► tracker ──► groups
+ camera ──RTSP 640×360──► YOLOX-nano on gmk ──► tracker ──► groups
+        (10 fps; detector   (people, ~20 ms,       (IDs)
+         takes ~4/s)          1 thread)
                           (people, ~13 ms,       (IDs)       │
                            1 thread)                         │ only at the moments that matter
                                                              ▼
@@ -87,16 +89,30 @@ Refilling the box raises the count, and that simply sets a new baseline.
   frame to frame by overlap, or, since a frame a second is a long time for a
   walking child, by a nearby centre and similar size. Two sightings make an
   ID real, and 4 s unseen ends it.
-- **Speed:** a welcome comes **~5–6 s** after someone appears (it was
-  10–13 s): ~1.2 s to confirm at ~1.6 frames a second (the camera takes
-  ~0.6 s per snapshot, which is the limit), ~1 s for the 4K still, ~2–3 s for
-  Claude, then the speaker. The costume look starts **the moment a person is
-  confirmed**, not after a forming wait. A faster frame rate would need the
-  camera's RTSP stream decoded in the pod, which would save about 1 s more.
+- **Speed:** pi4 starts talking **~5 s** after someone appears (it was
+  10–13 s): ~0.75 s to confirm (3 sightings at ~4 frames a second), ~1 s for
+  the 4K still, ~2–3 s for Claude, then the speaker. The costume look starts
+  **the moment a person is confirmed**.
+- **Frames come from the camera's RTSP stream** (`stream.py`): its 640×360
+  sub-stream at 10 fps, decoded with PyAV in one thread that keeps only the
+  newest frame. The detector takes the newest ~4 times a second. Snapshots
+  over HTTP took ~0.6 s each and held it to ~1.6. If the stream drops, the
+  loop falls back to snapshots while it reconnects (backing off, and 10 min
+  after a refused login, since that counts towards the lockout). RTSP has to
+  be on in the Reolink app. The camera takes 4–7 s to start a stream.
+- **Cost of all that:** ~15% of one CPU and ~210 MiB, within 1 CPU / 1 GiB.
+- **Claude with nobody there:** a box-alone count every 30 min, or every
+  10 min while no box is in view. (A bug asked ~20 times a minute when the
+  box couldn't be seen. Fixed.)
 - **The parting joke:** as soon as the costume is known, a second Claude call
   (text only, ~2–3 s) writes a short, funny, slightly spooky joke about it
-  while the group is still at the box. When the group has gone, the speaker
-  says it. If it arrives after they've left it's still said, but only within
+  while the group is still at the box. Groups that overlap in time are one
+  **visit**, and when the yard is empty again the speaker says **one** joke:
+  the biggest group's (most people, then the fullest description).
+- **One group, not three:** someone confirmed right beside a group already at
+  the box joins it, with no second welcome. Claude looks again so the
+  costume and joke cover everyone. A group that has gone by the time
+  Claude answers isn't welcomed. If it arrives after they've left it's still said, but only within
   15 s. No costume, no joke.
 - **Groups:** a new ID starts a group, which is "forming" for 2 s, so kids a
   step behind join it. Any new ID after that is a **new group, even while the

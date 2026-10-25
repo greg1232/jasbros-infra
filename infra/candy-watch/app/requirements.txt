@@ -4,3 +4,4 @@ onnxruntime==1.31.0     # YOLOX-nano, the person detector (vision.py)
 numpy>=2,<3
 pillow>=11,<13
 anthropic>=2.3,<3       # Claude, for costumes and counting (watch.py)
+av>=19,<20              # the camera's RTSP video stream (stream.py)

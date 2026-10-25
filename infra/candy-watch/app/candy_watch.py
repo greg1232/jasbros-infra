@@ -217,16 +217,26 @@ class Camera:
                 and not self.error}
 
 
-def keep_watching(camera: "Camera", watcher, every: float = 0.5) -> None:
-    """Small frames as fast as the camera hands them over (~0.6 s each),
-    through the detector — always, whether or not anyone has the page open,
-    because that's the job. ~15 ms of one CPU a frame."""
+def keep_watching(camera: "Camera", watcher, stream=None,
+                  fast: float = 0.25, slow: float = 0.5) -> None:
+    """Frames through the detector, always — whether or not anyone has the
+    page open, because that's the job. From the camera's video stream about
+    four a second when it's up (~15 ms of one CPU each); from snapshots, as
+    fast as the camera makes them (~0.6 s), when it isn't."""
+    last = 0.0
     while True:
         started = time.time()
-        frame = camera.snap()
-        if frame and watcher is not None:
+        picture, every = None, slow
+        if stream is not None and stream.live():
+            every = fast
+            image, at = stream.newest()
+            if at > last:
+                picture, last = image, at
+        else:
+            picture = camera.snap()
+        if picture is not None and watcher is not None:
             try:
-                watcher.step(frame)
+                watcher.step(picture)
             except Exception as error:         # one bad frame isn't the end
                 print(f"[candy] watch step failed: {type(error).__name__}: "
                       f"{error}", flush=True)
@@ -557,7 +567,7 @@ VERSION = hashlib.sha256(PAGE.encode()).hexdigest()[:12]
 
 def serve(speaker: Speaker, port: int, here: str = "", clip: Path = CLIP,
           camera: "Camera | None" = None, watcher=None,
-          interaction: "Interaction | None" = None
+          interaction: "Interaction | None" = None, stream=None
           ) -> http.server.ThreadingHTTPServer:
     """`here` is this app as the speakers reach it: http://<gmk>/candy."""
     interaction = interaction or Interaction(speaker, here, clip)
@@ -570,6 +580,8 @@ def serve(speaker: Speaker, port: int, here: str = "", clip: Path = CLIP,
                 return self._send(200, PAGE.encode(),
                                   "text/html; charset=utf-8")
             if path == "/api/frame.jpg":
+                if stream is not None and stream.live():
+                    return self._send(200, stream.jpeg(), "image/jpeg")
                 if camera is None:
                     return self._send(503, b"No camera is set up.",
                                       "text/plain")
@@ -583,6 +595,8 @@ def serve(speaker: Speaker, port: int, here: str = "", clip: Path = CLIP,
                                    "watch": watcher.status() if watcher
                                    else None,
                                    "camera": camera.status() if camera else {},
+                                   "stream": stream.status() if stream
+                                   else None,
                                    "speaker": speaker.name,
                                    "speaker_url": speaker.url,
                                    "clip": clip.is_file(),
@@ -663,7 +677,9 @@ def make_watcher(camera: "Camera", interaction: "Interaction"):
     print(f"[candy] watching: detector on 1 thread; "
           f"{'Claude ' + watch.MODEL if eyes else 'no Claude key — people only'}",
           flush=True)
-    return watch.Watcher(camera, detector, eyes, interaction)
+    # Three sightings to confirm someone: with the video stream that's under
+    # a second, and two at four frames a second let flickers through.
+    return watch.Watcher(camera, detector, eyes, interaction, need=3)
 
 
 def main() -> None:
@@ -693,13 +709,18 @@ def main() -> None:
                         os.environ.get("REOLINK_PASSWORD", ""))
         print(f"[candy] camera at {camera.host}", flush=True)
     interaction = Interaction(speaker, args.here.rstrip("/"), CLIP)
-    watcher = None
+    watcher = stream = None
     if camera:
         watcher = make_watcher(camera, interaction)
-        threading.Thread(target=keep_watching, args=(camera, watcher),
+        try:
+            import stream as streaming
+            stream = streaming.start(camera.host, camera.user, camera.password)
+        except ImportError:
+            print("[candy] no PyAV — snapshots only", flush=True)
+        threading.Thread(target=keep_watching, args=(camera, watcher, stream),
                          daemon=True).start()
     server = serve(speaker, args.port, args.here.rstrip("/"), CLIP, camera,
-                   watcher, interaction)
+                   watcher, interaction, stream)
     threading.Thread(target=server.serve_forever, daemon=True).start()
     while True:
         time.sleep(3600)

@@ -198,10 +198,11 @@ class Track:
     last_at: float
     hits: int = 1
     group: int | None = None
+    need: int = 2                   # sightings before it counts
 
     @property
     def confirmed(self) -> bool:
-        return self.hits >= 2
+        return self.hits >= self.need
 
 
 class Tracker:
@@ -214,8 +215,9 @@ class Tracker:
     over now and then, and that shouldn't make them a newcomer).
     """
 
-    def __init__(self, gone_seconds: float = 4, near: float = 0.12):
-        self.gone_seconds, self.near = gone_seconds, near
+    def __init__(self, gone_seconds: float = 4, near: float = 0.12,
+                 need: int = 2):
+        self.gone_seconds, self.near, self.need = gone_seconds, near, need
         self.tracks: dict[int, Track] = {}
         self.ids = itertools.count(1)
 
@@ -241,10 +243,10 @@ class Tracker:
         for i, box in enumerate(boxes):
             if i not in used_b:
                 tid = next(self.ids)
-                self.tracks[tid] = Track(tid, box, now, now)
+                self.tracks[tid] = Track(tid, box, now, now, need=self.need)
         for tid, track in list(self.tracks.items()):
             unseen = now - track.last_at
-            # A one-sighting track that isn't seen again was noise.
+            # A track not yet confirmed that misses a frame was noise.
             if (not track.confirmed and tid not in used_t and unseen > 0
                     and track.first_at != now) or unseen >= self.gone_seconds:
                 del self.tracks[tid]
@@ -314,13 +316,13 @@ class Watcher:
 
     def __init__(self, camera, detector, eyes, interaction, clock=time.time,
                  forming_seconds: float = 2, gone_seconds: float = 4,
-                 joke_late: float = 15,
+                 joke_late: float = 15, need: int = 2,
                  recount_every: float = 5, recounts_per_group: int = 6,
                  baseline_every: float = 1800, put_back_wait: float = 60,
                  background=None, state: Path | None = STATE):
         self.camera, self.detector, self.eyes = camera, detector, eyes
         self.interaction, self.clock = interaction, clock
-        self.tracker = Tracker(gone_seconds)
+        self.tracker = Tracker(gone_seconds, need=need)
         self.forming_seconds, self.joke_late = forming_seconds, joke_late
         self.recount_every, self.recounts_per_group = (recount_every,
                                                        recounts_per_group)
@@ -355,7 +357,8 @@ class Watcher:
 
     # -- every frame
 
-    def step(self, small: bytes) -> None:
+    def step(self, small) -> None:
+        """One frame: JPEG bytes from a snapshot, or a decoded stream frame."""
         found = self.detector.people(small)
         size = _size(small)
         boxes = [_normal(p["box"], size) for p in found]
@@ -525,6 +528,8 @@ class Watcher:
             group.kids = max(group.kids, seen["people"])
             self._event(f"group {group.id}: {group.kids} × "
                         f"{group.costume or 'no costume seen'}")
+        if group.id not in self.groups:
+            return                      # gone while Claude looked: no one to greet
         if group.costume:
             # The parting joke, fetched now so it's ready the moment they go.
             self.background(self._fetch_joke, group)
@@ -678,8 +683,10 @@ def _thread(target, *args) -> None:
     threading.Thread(target=target, args=args, daemon=True).start()
 
 
-def _size(jpeg: bytes) -> tuple[int, int]:
-    return Image.open(io.BytesIO(jpeg)).size
+def _size(picture) -> tuple[int, int]:
+    if isinstance(picture, Image.Image):
+        return picture.size
+    return Image.open(io.BytesIO(picture)).size
 
 
 def _normal(box: list[float], size: tuple[int, int]) -> list[float]:

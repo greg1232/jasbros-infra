@@ -13,7 +13,7 @@ ADD --checksum=sha256:c789161ed43c8269fcd4e67c67eeeb4e80c622da2eb296a20bc6007bd1
     /app/yolox_nano.onnx
 RUN chmod 644 /app/yolox_nano.onnx
 
-COPY candy_watch.py vision.py watch.py ./
+COPY candy_watch.py vision.py watch.py stream.py ./
 
 # The tests, on the image's own Python and packages. ./jasbros candy build
 # builds this stage first; a failure stops the build before anything is pushed.

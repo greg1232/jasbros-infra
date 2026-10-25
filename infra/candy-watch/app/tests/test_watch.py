@@ -282,6 +282,17 @@ class Groups(unittest.TestCase):
                           if q[0] == "arrival"], [])     # Claude not asked
         self.assertTrue(any("gone before a look" in e for e in w.events))
 
+    def test_gone_while_claude_looked_isnt_welcomed(self):
+        w = self.watcher(costumes=[("a ghost", 1)])
+        w.background = lambda target, *args: None if target == w._arrival \
+            else target(*args)
+        self.run_frames(w, [], 1)
+        self.run_frames(w, [person(0.1)], 3)
+        group = next(iter(w.groups.values()))
+        self.run_frames(w, [], 6)               # gone before the look returns
+        w._arrival(group)
+        self.assertEqual(self.interaction.welcomed, [])
+
     def test_kids_a_step_behind_join_the_group(self):
         w = self.watcher(costumes=[("a witch and a skeleton", 2)])
         self.run_frames(w, [], 1)

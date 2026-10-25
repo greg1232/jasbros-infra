@@ -28,7 +28,7 @@ APP = apps.App(
     name="candy-watch", namespace="candy-watch",
     source=HERE / "app", chart=HERE / "charts" / "candy-watch",
     files=("Dockerfile", "requirements.txt", "candy_watch.py", "vision.py",
-           "watch.py"), path="/candy",
+           "watch.py", "stream.py"), path="/candy",
     values=lambda: {"speaker": {"name": SPEAKER,
                                 "url": apps.speaker_url(SPEAKER)}})
 
