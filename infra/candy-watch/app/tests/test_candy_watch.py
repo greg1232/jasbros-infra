@@ -161,7 +161,7 @@ class Interactions(unittest.TestCase):
 
 class Welcome(unittest.TestCase):
     def test_names_the_costume(self):
-        self.assertIn("JAS Brothers Halloween candy computer",
+        self.assertIn("jas brothers Halloween candy computer",
                       candy_watch.welcome())
         self.assertIn("I see you're a scary witch!",
                       candy_watch.welcome("scary witch"))

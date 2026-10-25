@@ -38,7 +38,8 @@ def welcome(costume: str = "") -> str:
     Claude names it from the first frame (step 3); until then, from whoever
     runs the demo."""
     seen = f" I see you're {_a(costume)}!" if costume.strip() else ""
-    return (f"Welcome to the JAS Brothers Halloween candy computer!{seen} "
+    # "jas" in lower case so the speaker says it like "jazz", not J-A-S.
+    return (f"Welcome to the jas brothers Halloween candy computer!{seen} "
             f"Please take two candies each.")
 
 
