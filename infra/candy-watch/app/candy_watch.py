@@ -21,6 +21,7 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
+from collections import deque
 from pathlib import Path
 
 # What the gangster in "Angels with Filthy Souls" — the film inside Home
@@ -67,13 +68,61 @@ LAST_CHANCE = "You didn't put them back. All right..."
 CLIP = Path(os.environ.get("CLIP", "/clip/home-alone.flac"))
 
 
+# The conversation so far, on the pod's volume so a restart keeps it.
+TURNS = Path(os.environ.get("TURNS", "/data/turns.jsonl"))
+
+
+class Turns:
+    """Everything the speaker has said, oldest first — the dashboard's
+    scrollback. The newest few hundred, appended to a file as they happen."""
+
+    KEEP = 500
+
+    def __init__(self, path: Path | None = TURNS):
+        self.path = path
+        self.items: deque = deque(maxlen=self.KEEP)
+        self.lock = threading.Lock()
+        try:
+            for line in path.read_text().splitlines()[-self.KEEP:]:
+                self.items.append(json.loads(line))
+        except (OSError, ValueError, AttributeError):
+            pass
+        self.written = len(self.items)
+
+    def add(self, kind: str, text: str, ok: bool) -> None:
+        entry = {"at": round(time.time(), 1), "kind": kind, "text": text,
+                 "ok": ok}
+        with self.lock:
+            self.items.append(entry)
+            if self.path is None:
+                return
+            try:
+                self.path.parent.mkdir(parents=True, exist_ok=True)
+                if self.written >= 2 * self.KEEP:     # keep the file small
+                    self.path.write_text("".join(json.dumps(i) + "\n"
+                                                 for i in self.items))
+                    self.written = len(self.items)
+                else:
+                    with self.path.open("a") as out:
+                        out.write(json.dumps(entry) + "\n")
+                    self.written += 1
+            except OSError as error:
+                print(f"[candy] couldn't save a turn: {error}", flush=True)
+
+    def recent(self, n: int = 200) -> list[dict]:
+        with self.lock:
+            return list(self.items)[-n:]
+
+
 class Speaker:
     """One Claude speaker, through the API its own dashboard already has."""
 
-    def __init__(self, name: str, url: str, post=None, get=None):
+    def __init__(self, name: str, url: str, post=None, get=None,
+                 turns: Turns | None = None):
         self.name, self.url = name, url.rstrip("/")
         self.post = post or _post_json
         self.get = get or _get_json
+        self.turns = turns
         self.last: dict = {}
 
     def busy(self) -> bool:
@@ -90,7 +139,7 @@ class Speaker:
             sleep(0.5)
             waited += 0.5
 
-    def say(self, text: str) -> dict:
+    def say(self, text: str, kind: str = "typed") -> dict:
         text = " ".join(text.split())[:SAY_LIMIT]
         if not text:
             return {"ok": False, "said": "Nothing to say."}
@@ -101,11 +150,13 @@ class Speaker:
                      "speaker": self.name}
         print(f"[candy] {self.name}: {'said' if ok else 'COULD NOT SAY'} "
               f"{text!r}", flush=True)
+        if self.turns is not None:
+            self.turns.add(kind, text, ok)
         return {"ok": ok, "speaker": self.name, "text": text,
                 "said": (reply or {}).get("said",
                                           f"{self.name} didn't answer")}
 
-    def play(self, url: str) -> dict:
+    def play(self, url: str, what: str = "the film clip") -> dict:
         """Ask the speaker to fetch a recording from here and play it."""
         reply = self.post(f"{self.url}/api/do", {"what": "play", "value": url},
                           15)
@@ -114,6 +165,8 @@ class Speaker:
         self.last = {"at": time.time(), "text": url, "ok": ok,
                      "speaker": self.name}
         print(f"[candy] {self.name}: {said} ({url})", flush=True)
+        if self.turns is not None:
+            self.turns.add("film clip", what, ok)
         return {"ok": ok, "speaker": self.name, "said": said, "url": url}
 
 
@@ -121,10 +174,12 @@ def gangster(speaker: Speaker, here: str, clip: Path = CLIP) -> dict:
     """The line from the film if its clip is here, in the speaker's voice
     if it isn't — or if the speaker can't play it."""
     if here and clip.is_file():
-        played = speaker.play(f"{here}/clip/{clip.name}")
+        played = speaker.play(f"{here}/clip/{clip.name}",
+                              "Home Alone: \"...before I pump your guts full "
+                              "of lead!\"")
         if played["ok"]:
             return played
-    return speaker.say(GANGSTER)
+    return speaker.say(GANGSTER, "gangster")
 
 
 class Camera:
@@ -332,6 +387,17 @@ button:hover{border-color:var(--pumpkin)}
 .log{font:12px/1.5 ui-monospace,monospace;color:var(--dim);margin-top:.6rem;
   max-height:9rem;overflow:auto}
 .small{color:var(--dim);font-size:.8rem}
+.turns{max-height:24rem;overflow:auto}
+.turn{padding:.4rem 0;border-bottom:1px solid var(--edge)}
+.turn:last-child{border:0}
+.turn .when{color:var(--dim);font:12px ui-monospace,monospace;margin-right:.4rem}
+.tag{display:inline-block;font-size:.7rem;font-weight:700;padding:0 .45rem;
+  border-radius:999px;border:1px solid var(--edge);color:var(--dim);
+  margin-right:.4rem;text-transform:uppercase;letter-spacing:.04em}
+.tag.welcome{border-color:#5bc46b;color:#5bc46b}
+.tag.joke{border-color:#c77dff;color:#c77dff}
+.tag.call-out,.tag.warning,.tag.gangster,.tag.film{border-color:var(--bad);color:var(--bad)}
+.turn.failed{opacity:.55}
 </style>
 <main>
 <div class=top>
@@ -366,8 +432,8 @@ button:hover{border-color:var(--pumpkin)}
       <div class=log id=log></div>
     </div>
     <div class=card>
-      <h2>What the speaker said</h2>
-      <div id=now class=idle>Watching the candy box.</div>
+      <h2>Conversation</h2>
+      <div id=turns class=turns><span class=idle>Nothing said yet.</span></div>
     </div>
     <div class=card>
       <details><summary>Test it</summary>
@@ -467,12 +533,22 @@ async function status() {
   } else {
     $('engine').textContent = 'Not watching: no camera or no detector.';
   }
-  const demo = d.demo || {};
-  $('now').innerHTML = demo.steps && demo.steps.length
-    ? `<ol>${demo.steps.map(s => `<li>${esc(s)}</li>`).join('')}</ol>` +
-      (demo.running ? '' : '<div class=idle style="margin-top:.5rem">Done. Watching again.</div>')
-    : 'Watching the candy box.';
-  $('now').className = demo.steps && demo.steps.length ? '' : 'idle';
+  const turns = (d.turns || []).slice().reverse();      // newest first
+  const today = new Date().toDateString();
+  const when = t => {
+    const at = new Date(t * 1000);
+    return (at.toDateString() === today ? '' : at.toLocaleDateString() + ' ') +
+           at.toLocaleTimeString();
+  };
+  const html = turns.length ? turns.map(t =>
+    `<div class="turn${t.ok ? '' : ' failed'}"><span class=when>${when(t.at)}` +
+    `</span><span class="tag ${esc(t.kind.split(' ')[0])}">${esc(t.kind)}` +
+    `</span>${esc(t.text)}${t.ok ? '' : ' <span class=idle>(not said)</span>'}` +
+    `</div>`).join('') : '<span class=idle>Nothing said yet.</span>';
+  if ($('turns').dataset.html !== html) {     // don't jump the scroll for nothing
+    $('turns').innerHTML = html;
+    $('turns').dataset.html = html;
+  }
 }
 
 async function toggle() {
@@ -513,21 +589,21 @@ class Interaction:
         # a call-out in progress to finish rather than talking over it.
         self.talking = threading.Lock()
 
-    def _say(self, text: str) -> None:
+    def _say(self, text: str, kind: str) -> None:
         self.steps.append(text)
-        self.speaker.say(text)
+        self.speaker.say(text, kind)
         self.speaker.wait_until_quiet(self.sleep)
 
     def welcome(self, costume: str = "") -> None:
         """Someone has arrived: hello, and what they're dressed as."""
         with self.talking:
             self.steps = []
-            self._say(welcome(costume))
+            self._say(welcome(costume), "welcome")
 
     def farewell(self, joke: str) -> None:
         """They've gone: a parting joke about their costume."""
         with self.talking:
-            self._say(joke)
+            self._say(joke, "joke")
 
     def call_out(self, costume: str, put_back, wait: float = 60) -> list[str]:
         """Too many taken: ask for them back, then the film if they don't.
@@ -535,15 +611,15 @@ class Interaction:
         self.running = True
         try:
             self.talking.acquire()
-            self._say(call_out(costume))
+            self._say(call_out(costume), "call-out")
             waited = 0.0
             while waited < wait:
                 if put_back():
-                    self._say(THANKS)
+                    self._say(THANKS, "thanks")
                     return self.steps
                 self.sleep(5)
                 waited += 5
-            self._say(LAST_CHANCE)
+            self._say(LAST_CHANCE, "warning")
             self.steps.append("(the gangster)")
             gangster(self.speaker, self.here, self.clip)
             self.speaker.wait_until_quiet(self.sleep)
@@ -601,6 +677,8 @@ def serve(speaker: Speaker, port: int, here: str = "", clip: Path = CLIP,
                                    "speaker_url": speaker.url,
                                    "clip": clip.is_file(),
                                    "last": speaker.last,
+                                   "turns": speaker.turns.recent()
+                                   if speaker.turns else [],
                                    "demo": {"running": interaction.running,
                                             "steps": interaction.steps}})
             if path == "/healthz":
@@ -697,7 +775,7 @@ def main() -> None:
     name, _, url = args.speaker.partition("=")
     if not url:
         raise SystemExit("--speaker name=http://address:8080 (or $SPEAKER)")
-    speaker = Speaker(name, url)
+    speaker = Speaker(name, url, turns=Turns())
     print(f"[candy] speaking through {name} at {url}; serving on "
           f":{args.port}", flush=True)
     print(f"[candy] clip: {CLIP if CLIP.is_file() else 'none'}; "

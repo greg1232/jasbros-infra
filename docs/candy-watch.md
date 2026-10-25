@@ -109,6 +109,15 @@ Refilling the box raises the count, and that simply sets a new baseline.
   while the group is still at the box. Groups that overlap in time are one
   **visit**, and when the yard is empty again the speaker says **one** joke:
   the biggest group's (most people, then the fullest description).
+- **The jokes are scary:** funny, then an eerie twist ("…so does the thing
+  breathing behind you. And it isn't Vader."), campfire-scary and still for
+  young children: no gore, no real dangers, nothing threatening them. Kept
+  under 30 words and 180 characters, since the speaker cuts off at 200.
+- **Conversation scrollback:** every line the speaker says (welcome,
+  call-out, thanks, warning, film clip, joke, typed by hand) is logged with
+  its time and kind, and shown newest first on the dashboard. The last 500
+  are kept in `/data/turns.jsonl` on the pod's volume, so a restart keeps
+  them.
 - **One group, not three:** someone confirmed right beside a group already at
   the box joins it, with no second welcome. Claude looks again so the
   costume and joke cover everyone. A group that has gone by the time

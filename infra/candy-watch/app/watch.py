@@ -83,10 +83,15 @@ ARRIVAL_SCHEMA = {
 
 JOKE = (
     "Some trick-or-treaters dressed as {costume} are walking away from the "
-    "house. Write the one line the house's speaker calls after them: a "
-    "short Halloween joke about their costume, funny and a little spooky, "
-    "right for young children. It is spoken aloud, so no emoji or stage "
-    "directions, and under 30 words.")
+    "house. Write the one line the house's speaker calls after them, in a "
+    "low, creepy voice: a short Halloween joke about their costume that's "
+    "funny but genuinely spooky — end on an eerie twist that sends a little "
+    "shiver down their spine (something watching from the dark, a ghostly "
+    "warning, a creak behind them). Scary like a good campfire story, still "
+    "right for young children: no gore, no real-world dangers, nothing that "
+    "threatens the children themselves. It is spoken aloud, so no emoji or "
+    "stage directions, under 30 words and under 180 characters — the "
+    "speaker cuts off anything longer.")
 
 JOKE_SCHEMA = {
     "type": "object",

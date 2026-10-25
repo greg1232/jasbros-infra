@@ -159,6 +159,52 @@ class Interactions(unittest.TestCase):
         self.assertEqual(sum(slept), 5)
 
 
+class Conversation(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.path = Path(self.tmp.name) / "turns.jsonl"
+        self.fake = TalkingSpeaker()
+        self.turns = candy_watch.Turns(self.path)
+        self.speaker = candy_watch.Speaker("pi4", "http://x", self.fake.post,
+                                           self.fake.get, self.turns)
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def test_every_line_is_kept_with_what_kind_it_was(self):
+        clip = Path(self.tmp.name) / "home-alone.flac"
+        clip.write_bytes(b"fLaC")
+        interaction = candy_watch.Interaction(self.speaker, "http://gmk/candy",
+                                              clip, sleep=lambda s: None)
+        interaction.run(wait=10, costume="scary witch")
+        interaction.farewell("Bye, witch! Something is following you home...")
+        self.speaker.say("Testing, testing.")
+        self.assertEqual([t["kind"] for t in self.turns.recent()],
+                         ["welcome", "call-out", "warning", "film clip",
+                          "joke", "typed"])
+        self.assertIn("scary witch", self.turns.recent()[0]["text"])
+
+    def test_it_survives_a_restart(self):
+        self.speaker.say("Happy Halloween!")
+        again = candy_watch.Turns(self.path)
+        self.assertEqual([t["text"] for t in again.recent()],
+                         ["Happy Halloween!"])
+
+    def test_the_file_stays_small(self):
+        for i in range(3 * candy_watch.Turns.KEEP):
+            self.turns.add("typed", f"line {i}", True)
+        lines = self.path.read_text().splitlines()
+        self.assertLessEqual(len(lines), 2 * candy_watch.Turns.KEEP)
+        self.assertEqual(candy_watch.Turns(self.path).recent(1)[0]["text"],
+                         f"line {3 * candy_watch.Turns.KEEP - 1}")
+
+    def test_a_line_the_speaker_didnt_take_is_marked(self):
+        quiet = candy_watch.Speaker("pi4", "http://x", FakeSpeaker(False).post,
+                                    turns=self.turns)
+        quiet.say("Hello?")
+        self.assertFalse(self.turns.recent()[-1]["ok"])
+
+
 class Welcome(unittest.TestCase):
     def test_names_the_costume(self):
         self.assertIn("jas brothers Halloween candy computer",
