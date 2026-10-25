@@ -217,9 +217,10 @@ class Camera:
                 and not self.error}
 
 
-def keep_watching(camera: "Camera", watcher, every: float = 1) -> None:
-    """A small frame a second, through the detector — always, whether or not
-    anyone has the page open, because that's the job. ~25 ms of one CPU."""
+def keep_watching(camera: "Camera", watcher, every: float = 0.5) -> None:
+    """Small frames as fast as the camera hands them over (~0.6 s each),
+    through the detector — always, whether or not anyone has the page open,
+    because that's the job. ~15 ms of one CPU a frame."""
     while True:
         started = time.time()
         frame = camera.snap()
@@ -512,6 +513,11 @@ class Interaction:
         with self.talking:
             self.steps = []
             self._say(welcome(costume))
+
+    def farewell(self, joke: str) -> None:
+        """They've gone: a parting joke about their costume."""
+        with self.talking:
+            self._say(joke)
 
     def call_out(self, costume: str, put_back, wait: float = 60) -> list[str]:
         """Too many taken: ask for them back, then the film if they don't.

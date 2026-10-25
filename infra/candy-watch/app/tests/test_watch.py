@@ -64,25 +64,31 @@ class Eyes:
 
     def ask(self, stills, question, schema):
         self.looks += 1
-        arriving = question is watch.ARRIVAL
-        self.questions.append(("arrival" if arriving else "count", len(stills)))
+        if question is watch.ARRIVAL:
+            self.questions.append(("arrival", len(stills)))
+            costume, people = self.costumes.pop(0)
+            return {"costume": costume, "people": people}
+        self.questions.append(("count", len(stills)))
         count = self.counts.pop(0) if self.counts else self.last_count
         self.last_count = count
-        answer = {"candies": count[0], "blocked": count[1]}
-        if arriving:
-            costume, people = self.costumes.pop(0)
-            answer.update(costume=costume, people=people)
-        return answer
+        return {"candies": count[0], "blocked": count[1]}
+
+    def joke(self, costume):
+        self.jokes = getattr(self, "jokes", []) + [costume]
+        return getattr(self, "joke_text", None) or f"a joke about {costume}"
 
     last_count = (30, False)
 
 
 class Interaction:
     def __init__(self):
-        self.welcomed, self.called_out = [], []
+        self.welcomed, self.called_out, self.farewells = [], [], []
 
     def welcome(self, costume):
         self.welcomed.append(costume)
+
+    def farewell(self, joke):
+        self.farewells.append(joke)
 
     def call_out(self, who, put_back, wait):
         self.called_out.append(who)
@@ -174,8 +180,56 @@ class Groups(unittest.TestCase):
         self.run_frames(w, [], 1)
         self.run_frames(w, [person(0.1)], 30)
         arrivals = [q for q in self.eyes.questions if q[0] == "arrival"]
-        self.assertEqual(arrivals, [("arrival", 2)])    # the crop, the frame
+        self.assertEqual(arrivals, [("arrival", 1)])    # just the crop
         self.assertEqual(self.interaction.welcomed, ["scary witch"])
+
+    def test_the_costume_look_happens_as_soon_as_they_are_confirmed(self):
+        w = self.watcher(costumes=[("scary witch", 1)])
+        self.run_frames(w, [], 1)
+        self.run_frames(w, [person(0.1)], 2)            # seen twice: confirmed
+        self.assertEqual(self.interaction.welcomed, ["scary witch"])
+
+    def test_the_joke_is_fetched_early_and_said_when_they_go(self):
+        w = self.watcher(costumes=[("scary witch", 1)])
+        self.run_frames(w, [], 1)
+        self.run_frames(w, [person(0.1)], 3)
+        self.assertEqual(self.eyes.jokes, ["scary witch"])   # already fetched
+        self.assertEqual(self.interaction.farewells, [])     # not said yet
+        self.run_frames(w, [], 6)                            # they've gone
+        self.assertEqual(self.interaction.farewells,
+                         ["a joke about scary witch"])
+
+    def test_a_joke_that_comes_back_late_is_still_said(self):
+        w = self.watcher(costumes=[("scary witch", 1)])
+        w.background = lambda target, *args: None if target == \
+            w._fetch_joke else target(*args)
+        self.run_frames(w, [], 1)
+        self.run_frames(w, [person(0.1)], 3)
+        group = next(iter(w.groups.values()))
+        self.run_frames(w, [], 6)                            # gone, no joke yet
+        self.assertEqual(self.interaction.farewells, [])
+        w._fetch_joke(group)                                 # it arrives now
+        self.assertEqual(self.interaction.farewells,
+                         ["a joke about scary witch"])
+
+    def test_a_joke_too_late_is_dropped(self):
+        w = self.watcher(costumes=[("scary witch", 1)])
+        w.background = lambda target, *args: None if target == \
+            w._fetch_joke else target(*args)
+        self.run_frames(w, [], 1)
+        self.run_frames(w, [person(0.1)], 3)
+        group = next(iter(w.groups.values()))
+        self.run_frames(w, [], 30)                           # long gone
+        w._fetch_joke(group)
+        self.assertEqual(self.interaction.farewells, [])
+
+    def test_no_costume_no_joke(self):
+        w = self.watcher(costumes=[("", 1)])
+        self.run_frames(w, [], 1)
+        self.run_frames(w, [person(0.1)], 3)
+        self.run_frames(w, [], 6)
+        self.assertEqual(self.interaction.farewells, [])
+        self.assertFalse(hasattr(self.eyes, "jokes"))
 
     def test_gone_by_the_time_of_the_still_isnt_welcomed(self):
         # walked straight through: in the small frames, not in the 4K still
@@ -217,7 +271,7 @@ class Groups(unittest.TestCase):
 
     def test_two_each_is_fine(self):
         w = self.watcher(costumes=[("two ghosts", 2)],
-                         counts=[(30, False), (30, False), (26, False)])
+                         counts=[(30, False), (26, False)])
         self.run_frames(w, [], 1)
         self.run_frames(w, [person(0.1), person(0.4)], 30)
         self.assertEqual(w.taken, 4)
@@ -225,34 +279,34 @@ class Groups(unittest.TestCase):
 
     def test_too_many_twice_running_is_called_out_by_costume(self):
         w = self.watcher(costumes=[("scary witch", 1)],
-                         counts=[(30, False), (30, False), (27, False)])
+                         counts=[(30, False), (27, False)])
         self.run_frames(w, [], 1)
         self.run_frames(w, [person(0.1)], 30)
         self.assertEqual(self.interaction.called_out, ["scary witch"])
 
     def test_the_same_kids_are_only_called_out_once(self):
         w = self.watcher(costumes=[("scary witch", 1)],
-                         counts=[(30, False), (30, False), (27, False)])
+                         counts=[(30, False), (27, False)])
         self.run_frames(w, [], 1)
         self.run_frames(w, [person(0.1)], 120)      # they just stand there
         self.assertEqual(self.interaction.called_out, ["scary witch"])
 
     def test_a_new_group_can_still_be_called_out(self):
-        # alone 30 · witch arrives 30 · 30 · 27 · 27 → called out
-        # · alone again 27 · astronaut arrives, 20 left → 7 taken
+        # alone 30 · witch: 30 · 27 · 27 → called out · 27 (while her group
+        # lingers) · alone again 27 · astronaut: 20 → 7 taken
         w = self.watcher(costumes=[("scary witch", 1), ("tiny astronaut", 1)],
-                         counts=[(30, False), (30, False), (30, False),
+                         counts=[(30, False), (30, False), (27, False),
                                  (27, False), (27, False), (27, False),
                                  (20, False)])
         self.run_frames(w, [], 1)
-        self.run_frames(w, [person(0.1)], 20)
+        self.run_frames(w, [person(0.1)], 17)       # three recounts
         self.run_frames(w, [], 6)                   # the witch leaves
         self.run_frames(w, [person(0.6)], 40)       # the astronaut takes 7
         self.assertEqual(self.interaction.called_out,
                          ["scary witch", "tiny astronaut"])
 
     def test_grabbing_before_claude_first_looks_still_counts(self):
-        # the box had 30; by the arrival look, 25 — that's 5 taken
+        # the box had 30 before they got there; first count 25 — 5 taken
         w = self.watcher(costumes=[("scary witch", 1)],
                          counts=[(30, False), (25, False)])
         self.run_frames(w, [], 1)
@@ -261,16 +315,15 @@ class Groups(unittest.TestCase):
 
     def test_once_is_not_believed(self):
         w = self.watcher(costumes=[("scary witch", 1)],
-                         counts=[(30, False), (30, False), (27, False),
-                                 (29, False)])
+                         counts=[(30, False), (27, False), (29, False)])
         self.run_frames(w, [], 1)
         self.run_frames(w, [person(0.1)], 30)
         self.assertEqual(self.interaction.called_out, [])
 
     def test_counts_through_an_arm_dont_count(self):
         w = self.watcher(costumes=[("scary witch", 1)],
-                         counts=[(30, False), (30, False), (10, True),
-                                 (10, True), (29, False)])
+                         counts=[(30, False), (10, True), (10, True),
+                                 (29, False)])
         self.run_frames(w, [], 1)
         self.run_frames(w, [person(0.1)], 30)
         self.assertEqual(self.interaction.called_out, [])
@@ -278,8 +331,8 @@ class Groups(unittest.TestCase):
 
     def test_putting_back_is_judged_against_the_allowance(self):
         w = self.watcher(costumes=[("scary witch", 1)],
-                         counts=[(30, False), (30, False), (27, False),
-                                 (27, False), (28, False)])
+                         counts=[(30, False), (27, False), (27, False),
+                                 (28, False)])
         self.run_frames(w, [], 1)
         self.run_frames(w, [person(0.1)], 30)
         self.assertTrue(self.interaction.put_back())    # 2 taken now

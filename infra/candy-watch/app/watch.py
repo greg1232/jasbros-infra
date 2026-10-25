@@ -55,15 +55,14 @@ COUNT = (
     "the count may be wrong.")
 
 ARRIVAL = (
-    "Two pictures from the candy camera. The first is cropped to some "
-    "people who have just walked up; the second is the whole frame.\n"
-    "- costume: what the people in the FIRST picture are dressed as, all of "
+    "A picture from the candy camera, cropped to some people who have just "
+    "walked up.\n"
+    "- costume: what the people in the picture are dressed as, all of "
     "them together in at most 8 words, written to follow \"I see you're\" — "
     "so with its article: \"a scary witch\", \"Darth Vader\", \"a skeleton "
     "and a pirate\". Empty if they're in everyday clothes or you can't see "
     "them well enough to tell — never guess.\n"
-    "- people: how many people are in the first picture.\n"
-    "From the SECOND picture:\n" + COUNT)
+    "- people: how many people are in the picture.")
 
 RECOUNT = "One picture from the candy camera.\n" + COUNT
 
@@ -77,9 +76,22 @@ COUNT_SCHEMA = {
 ARRIVAL_SCHEMA = {
     "type": "object",
     "properties": {"costume": {"type": "string"},
-                   "people": {"type": "integer"},
-                   **COUNT_SCHEMA["properties"]},
-    "required": ["costume", "people", "candies", "blocked"],
+                   "people": {"type": "integer"}},
+    "required": ["costume", "people"],
+    "additionalProperties": False,
+}
+
+JOKE = (
+    "Some trick-or-treaters dressed as {costume} are walking away from the "
+    "house. Write the one line the house's speaker calls after them: a "
+    "short Halloween joke about their costume, funny and a little spooky, "
+    "right for young children. It is spoken aloud, so no emoji or stage "
+    "directions, and under 30 words.")
+
+JOKE_SCHEMA = {
+    "type": "object",
+    "properties": {"joke": {"type": "string"}},
+    "required": ["joke"],
     "additionalProperties": False,
 }
 
@@ -123,7 +135,7 @@ class Eyes:
             ) -> dict | None:
         import anthropic
 
-        content = [{"type": "image", "source": {
+        content: list = [{"type": "image", "source": {
             "type": "base64", "media_type": "image/jpeg",
             "data": base64.standard_b64encode(shrink(s)).decode()}}
             for s in stills]
@@ -169,6 +181,11 @@ class Eyes:
         self.last, self.error = seen, ""
         print(f"[candy] Claude saw {seen}", flush=True)
         return seen
+
+    def joke(self, costume: str) -> str | None:
+        """A parting line about a costume — no picture needed."""
+        said = self.ask([], JOKE.format(costume=costume), JOKE_SCHEMA)
+        return (said or {}).get("joke", "").strip() or None
 
 
 # --- who is who, frame to frame -----------------------------------------------
@@ -275,6 +292,8 @@ class Group:
     kids: int = 0
     baseline: int | None = None     # candies when they arrived
     looked: bool = False            # the one costume look has been made
+    joke: str | None = None         # fetched as soon as the costume is known
+    left_at: float | None = None    # gone, and the joke not ready yet
 
 
 class Watcher:
@@ -286,14 +305,15 @@ class Watcher:
     """
 
     def __init__(self, camera, detector, eyes, interaction, clock=time.time,
-                 forming_seconds: float = 3, gone_seconds: float = 4,
+                 forming_seconds: float = 2, gone_seconds: float = 4,
+                 joke_late: float = 15,
                  recount_every: float = 5, recounts_per_group: int = 6,
                  baseline_every: float = 1800, put_back_wait: float = 60,
                  background=None, state: Path | None = STATE):
         self.camera, self.detector, self.eyes = camera, detector, eyes
         self.interaction, self.clock = interaction, clock
         self.tracker = Tracker(gone_seconds)
-        self.forming_seconds = forming_seconds
+        self.forming_seconds, self.joke_late = forming_seconds, joke_late
         self.recount_every, self.recounts_per_group = (recount_every,
                                                        recounts_per_group)
         self.baseline_every, self.put_back_wait = (baseline_every,
@@ -314,6 +334,7 @@ class Watcher:
         self.recounts = 0
         self.last_look_at = 0.0
         self.looking = False
+        self.leaving: list[Group] = []          # gone, joke on its way
         self.events: list[str] = []
         self.lock = threading.RLock()
 
@@ -351,6 +372,12 @@ class Watcher:
         group.tracks.add(track.id)
         group.kids = max(group.kids, len(group.tracks))
         track.group = group.id
+        if not group.looked and self.on and self.eyes is not None:
+            # Straight away, not after the forming window: kids a step
+            # behind are almost always in the same 4K still anyway, and the
+            # wait was the slowest part of a welcome.
+            group.looked = True
+            self.background(self._arrival, group)
 
     def _end_groups(self) -> None:
         live = set(self.tracker.tracks)
@@ -359,18 +386,15 @@ class Watcher:
             if not group.tracks:
                 del self.groups[gid]
                 self._event(f"group {gid} has gone")
+                self._farewell(group)
                 if not self.groups:
                     self.baseline_at = 0.0      # recount the box, alone
                     self.over = 0
 
     def _next_look(self, now: float) -> None:
-        ready = [g for g in self.groups.values() if not g.looked
-                 and now - g.started_at >= self.forming_seconds]
-        if ready:
-            group = ready[0]
-            group.looked = True
-            self._look_soon(self._arrival, group)
-        elif self.groups:
+        self.leaving = [g for g in self.leaving
+                        if now - g.left_at < self.joke_late]
+        if self.groups:
             # Counting needs a box Claude can see; until one has been
             # counted, recounts would only ever come back "can't see it".
             if (self.count is not None or self.baseline is not None) and (
@@ -452,20 +476,35 @@ class Watcher:
             return
         around = [min(b[0] for b in theirs), min(b[1] for b in theirs),
                   max(b[2] for b in theirs), max(b[3] for b in theirs)]
-        seen = self.eyes.ask([crop(still, around), still], ARRIVAL,
-                             ARRIVAL_SCHEMA)
+        seen = self.eyes.ask([crop(still, around)], ARRIVAL, ARRIVAL_SCHEMA)
         if not seen:
             return
         with self.lock:
             group.costume = seen["costume"].strip()
             group.kids = max(group.kids, seen["people"])
-            if self._believable(seen):
-                self.count = seen["candies"]
-                if group.baseline is None:      # nobody had counted it yet
-                    group.baseline = self.count
             self._event(f"group {group.id}: {group.kids} × "
                         f"{group.costume or 'no costume seen'}")
-        self.background(self.interaction.welcome, group.costume)
+        if group.costume:
+            # The parting joke, fetched now so it's ready the moment they go.
+            self.background(self._fetch_joke, group)
+        self.interaction.welcome(group.costume)
+
+    def _fetch_joke(self, group: Group) -> None:
+        joke = self.eyes.joke(group.costume)
+        with self.lock:
+            group.joke = joke
+            late = group in self.leaving
+            if late:
+                self.leaving.remove(group)
+        if joke and late:               # they left before it arrived
+            self.interaction.farewell(joke)
+
+    def _farewell(self, group: Group) -> None:
+        if group.joke:
+            self.background(self.interaction.farewell, group.joke)
+        elif group.costume:
+            group.left_at = self.clock()
+            self.leaving.append(group)
 
     def _recount(self) -> None:
         still = self.camera.still()

@@ -64,12 +64,14 @@ Refilling the box raises the count, and that simply sets a new baseline.
 ### Seeing: a small model on gmk decides when Claude looks (built)
 
 ```
- camera ──640×360, 1/s──► YOLOX-nano on gmk ──► tracker ──► groups
+ camera ──640×360, ~1.6/s─► YOLOX-nano on gmk ──► tracker ──► groups
                           (people, ~13 ms,       (IDs)       │
                            1 thread)                         │ only at the moments that matter
                                                              ▼
                                    Claude (claude-opus-5-5, effort low), a 4K still:
-                                     · a new group has formed → costume (crop of just them) + count
+                                     · a person is confirmed → costume (a crop of just them, found
+                                       in the 4K still itself), then a parting joke, prefetched
+                                     · the group has gone → the joke, said as they walk away
                                      · every 5 s while anyone's there → count only (≤6 per group)
                                      · box alone 30 min → count (fresh baseline)
 ```
@@ -85,7 +87,18 @@ Refilling the box raises the count, and that simply sets a new baseline.
   frame to frame by overlap, or, since a frame a second is a long time for a
   walking child, by a nearby centre and similar size. Two sightings make an
   ID real, and 4 s unseen ends it.
-- **Groups:** a new ID starts a group, which is "forming" for 3 s, so kids a
+- **Speed:** a welcome comes **~5–6 s** after someone appears (it was
+  10–13 s): ~1.2 s to confirm at ~1.6 frames a second (the camera takes
+  ~0.6 s per snapshot, which is the limit), ~1 s for the 4K still, ~2–3 s for
+  Claude, then the speaker. The costume look starts **the moment a person is
+  confirmed**, not after a forming wait. A faster frame rate would need the
+  camera's RTSP stream decoded in the pod, which would save about 1 s more.
+- **The parting joke:** as soon as the costume is known, a second Claude call
+  (text only, ~2–3 s) writes a short, funny, slightly spooky joke about it
+  while the group is still at the box. When the group has gone, the speaker
+  says it. If it arrives after they've left it's still said, but only within
+  15 s. No costume, no joke.
+- **Groups:** a new ID starts a group, which is "forming" for 2 s, so kids a
   step behind join it. Any new ID after that is a **new group, even while the
   last one is still at the box**. **One costume look per group**, on a
   crop of just its members. The welcome waits for the speaker if a
