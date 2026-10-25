@@ -121,7 +121,9 @@ Refilling the box raises the count, and that simply sets a new baseline.
 - **Costumes are described** with a vivid visible detail or two, up to 12
   words ("Darth Vader in cozy plaid pajamas", "a spooky grim reaper with
   skeleton hands and a pointy-hatted witch"), still only what's actually
-  there. The welcome stays under the speaker's 200 characters.
+  there. **Everyone gets a description**, costume or not: everyday clothes
+  get a playful Halloween spin ("a mysterious visitor in a striped dress
+  peeking around the door"). It's empty only when nobody can be made out. The welcome stays under the speaker's 200 characters.
 - **Pets are part of the group:** the detector also reports dogs and cats
   (COCO 16, 15), which join the group and the crop. Claude describes them
   too: "a pirate and a golden retriever in a pumpkin suit", or "you and your

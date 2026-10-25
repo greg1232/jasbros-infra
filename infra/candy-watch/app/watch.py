@@ -57,31 +57,24 @@ COUNT = (
 ARRIVAL = (
     "A picture from the candy camera, cropped to some people who have just "
     "walked up.\n"
-    "- costume: what everyone in the picture is dressed as — people and any "
+    "- costume: what everyone in the picture is wearing — people and any "
     "pets with them — all together, with a vivid detail or two you can "
-    "actually see — "
-    "colours, accessories, how it's worn, anything funny about it — in at "
-    "most 12 words, written to follow \"I see you're\", article and all: "
-    "\"Darth Vader in cozy plaid pajamas\", \"a witch with a glowing green "
-    "broom\", \"a pirate and a golden retriever in a pumpkin suit\". A pet "
-    "that isn't dressed up still gets mentioned (\"...and their fluffy "
-    "brown dog\"); a person in everyday clothes can be \"you and your "
-    "fluffy brown dog\". Empty only if nobody is in costume and there's no "
-    "pet — describe only what's there, never guess.\n"
+    "actually see (colours, accessories, how it's worn, anything funny about "
+    "it), in at most 12 words, written to follow \"I see you're\", article "
+    "and all. A real costume: \"Darth Vader in cozy plaid pajamas\", \"a "
+    "witch with a glowing green broom\". Not obviously a costume? Still "
+    "describe them — everyday clothes, said with a playful Halloween spin: "
+    "\"a mysterious figure in a cozy grey hoodie\", \"someone in a bright "
+    "red raincoat and boots\". Pets too: \"a pirate and a golden retriever "
+    "in a pumpkin suit\", \"you and your fluffy brown dog\". If there's a "
+    "person or a pet, never leave this empty; empty only if you can't make "
+    "out anyone at all. Describe only what's there — never invent a "
+    "costume.\n"
     "- people: how many real people are in the picture (not pets). 0 if "
     "there are none — only pets, or things that look a bit like a person: "
     "a birdhouse, a post, a scarecrow, a shadow.\n"
     "- animals: how many real animals (dogs, cats) are in the picture.")
 
-RECOUNT = "One picture from the candy camera.\n" + COUNT
-
-COUNT_SCHEMA = {
-    "type": "object",
-    "properties": {"candies": {"type": "integer"},
-                   "blocked": {"type": "boolean"}},
-    "required": ["candies", "blocked"],
-    "additionalProperties": False,
-}
 ARRIVAL_SCHEMA = {
     "type": "object",
     "properties": {"costume": {"type": "string"},
