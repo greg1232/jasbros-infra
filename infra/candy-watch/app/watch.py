@@ -266,6 +266,13 @@ def _likeness(a: list[float], b: list[float], near: float) -> float:
     return 0.0
 
 
+def _beside(a, b, near: float = 0.25) -> bool:
+    """Close enough to be together: touching, or centres near each other."""
+    (ax, ay), (bx, by) = _centre(a), _centre(b)
+    return (_iou(a, b) > 0
+            or ((ax - bx) ** 2 + (ay - by) ** 2) ** 0.5 < near)
+
+
 def _iou(a, b) -> float:
     w = max(0.0, min(a[2], b[2]) - max(a[0], b[0]))
     h = max(0.0, min(a[3], b[3]) - max(a[1], b[1]))
@@ -294,6 +301,7 @@ class Group:
     looked: bool = False            # the one costume look has been made
     joke: str | None = None         # fetched as soon as the costume is known
     left_at: float | None = None    # gone, and the joke not ready yet
+    relooked_at: float = 0.0        # last look after someone joined late
 
 
 class Watcher:
@@ -335,6 +343,9 @@ class Watcher:
         self.last_look_at = 0.0
         self.looking = False
         self.leaving: list[Group] = []          # gone, joke on its way
+        # Every group since the yard was last empty. Groups that overlap in
+        # time are one visit, and get one parting joke: the biggest group's.
+        self.visit: list[Group] = []
         self.events: list[str] = []
         self.lock = threading.RLock()
 
@@ -358,8 +369,19 @@ class Watcher:
     def _join(self, track: Track, now: float) -> None:
         forming = [g for g in self.groups.values()
                    if now - g.started_at < self.forming_seconds]
+        beside = self._beside(track)
         if forming:
             group = forming[-1]
+        elif beside:
+            # Right next to a group already at the box: the same group. A kid
+            # a few steps behind, or the detector seeing two kids close
+            # together as one box and then two, made new groups — and new
+            # welcomes — for people who'd already been greeted.
+            group = beside
+            if (group.looked and self.on and self.eyes is not None
+                    and now - group.relooked_at >= 5):
+                group.relooked_at = now
+                self.background(self._relook, group)
         else:
             # Their starting point is the box as it was before they got
             # there — not whatever is left by the time Claude first looks.
@@ -367,6 +389,7 @@ class Watcher:
                           baseline=self.count if self.count is not None
                           else self.baseline)
             self.groups[group.id] = group
+            self.visit.append(group)
             self.recounts = 0
             self._event(f"group {group.id} arriving")
         group.tracks.add(track.id)
@@ -379,6 +402,15 @@ class Watcher:
             group.looked = True
             self.background(self._arrival, group)
 
+    def _beside(self, track: Track) -> "Group | None":
+        for group in self.groups.values():
+            for tid in group.tracks:
+                other = self.tracker.tracks.get(tid)
+                if other and other.id != track.id and _beside(other.box,
+                                                              track.box):
+                    return group
+        return None
+
     def _end_groups(self) -> None:
         live = set(self.tracker.tracks)
         for gid, group in list(self.groups.items()):
@@ -386,10 +418,10 @@ class Watcher:
             if not group.tracks:
                 del self.groups[gid]
                 self._event(f"group {gid} has gone")
-                self._farewell(group)
                 if not self.groups:
                     self.baseline_at = 0.0      # recount the box, alone
                     self.over = 0
+                    self._farewell()
 
     def _next_look(self, now: float) -> None:
         self.leaving = [g for g in self.leaving
@@ -422,6 +454,7 @@ class Watcher:
                 return
             self.on = on
             self.groups.clear()
+            self.visit, self.leaving = [], []
             for track in self.tracker.tracks.values():
                 track.group = -1        # here before: not a newcomer
             self.over, self.recounts = 0, 0
@@ -457,10 +490,11 @@ class Watcher:
                 self.looking = False
         self.background(look)
 
-    def _arrival(self, group: Group) -> None:
+    def _look_at(self, group: Group) -> dict | None:
+        """One costume look at a group, in a fresh 4K still."""
         still = self.camera.still()
         if not still:
-            return
+            return None
         # Find them in this very picture. The small frame the tracker saw is
         # a second or two older, and someone walking through has moved on
         # since — cropping where they *were* showed Claude empty yard.
@@ -473,10 +507,13 @@ class Watcher:
         if not theirs:
             with self.lock:
                 self._event(f"group {group.id} gone before a look")
-            return
+            return None
         around = [min(b[0] for b in theirs), min(b[1] for b in theirs),
                   max(b[2] for b in theirs), max(b[3] for b in theirs)]
-        seen = self.eyes.ask([crop(still, around)], ARRIVAL, ARRIVAL_SCHEMA)
+        return self.eyes.ask([crop(still, around)], ARRIVAL, ARRIVAL_SCHEMA)
+
+    def _arrival(self, group: Group) -> None:
+        seen = self._look_at(group)
         if not seen:
             return
         with self.lock:
@@ -489,6 +526,19 @@ class Watcher:
             self.background(self._fetch_joke, group)
         self.interaction.welcome(group.costume)
 
+    def _relook(self, group: Group) -> None:
+        """Someone joined a group already greeted: no second welcome, but
+        see them all, so the parting joke is about everyone."""
+        seen = self._look_at(group)
+        if not seen or not seen["costume"].strip():
+            return
+        with self.lock:
+            group.costume = seen["costume"].strip()
+            group.kids = max(group.kids, seen["people"])
+            self._event(f"group {group.id} now: {group.kids} × "
+                        f"{group.costume}")
+        self.background(self._fetch_joke, group)
+
     def _fetch_joke(self, group: Group) -> None:
         joke = self.eyes.joke(group.costume)
         with self.lock:
@@ -499,12 +549,19 @@ class Watcher:
         if joke and late:               # they left before it arrived
             self.interaction.farewell(joke)
 
-    def _farewell(self, group: Group) -> None:
-        if group.joke:
-            self.background(self.interaction.farewell, group.joke)
-        elif group.costume:
-            group.left_at = self.clock()
-            self.leaving.append(group)
+    def _farewell(self) -> None:
+        """The yard is empty again: one joke for the whole visit — the
+        biggest group's, which is usually the one describing everybody."""
+        dressed = [g for g in self.visit if g.costume]
+        self.visit = []
+        if not dressed:
+            return
+        biggest = max(dressed, key=lambda g: (g.kids, len(g.costume)))
+        if biggest.joke:
+            self.background(self.interaction.farewell, biggest.joke)
+        else:
+            biggest.left_at = self.clock()
+            self.leaving = [biggest]
 
     def _recount(self) -> None:
         still = self.camera.still()

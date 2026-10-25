@@ -223,6 +223,32 @@ class Groups(unittest.TestCase):
         w._fetch_joke(group)
         self.assertEqual(self.interaction.farewells, [])
 
+    def test_overlapping_groups_get_one_joke_the_biggest_groups(self):
+        w = self.watcher(costumes=[("a witch", 1), ("two ghosts", 2)])
+        self.run_frames(w, [], 1)
+        self.run_frames(w, [person(0.1)], 5)
+        self.run_frames(w, [person(0.1), person(0.6), person(0.75)], 5)
+        self.assertEqual(self.interaction.welcomed, ["a witch", "two ghosts"])
+        self.run_frames(w, [person(0.6), person(0.75)], 6)   # the witch goes
+        self.assertEqual(self.interaction.farewells, [])     # visit not over
+        self.run_frames(w, [], 6)                            # everyone's gone
+        self.assertEqual(self.interaction.farewells,
+                         ["a joke about two ghosts"])
+
+    def test_someone_beside_a_greeted_group_joins_it(self):
+        # the Mandalorian, then Darth Vader a few seconds later beside him
+        w = self.watcher(costumes=[("a brave Mandalorian", 1),
+                                   ("Darth Vader and a Mandalorian", 2)])
+        self.run_frames(w, [], 1)
+        self.run_frames(w, [person(0.1)], 5)
+        self.run_frames(w, [person(0.1), person(0.2)], 5)
+        self.assertEqual(self.interaction.welcomed, ["a brave Mandalorian"])
+        self.assertEqual([g["costume"] for g in w.status()["groups"]],
+                         ["Darth Vader and a Mandalorian"])
+        self.run_frames(w, [], 6)
+        self.assertEqual(self.interaction.farewells,
+                         ["a joke about Darth Vader and a Mandalorian"])
+
     def test_no_costume_no_joke(self):
         w = self.watcher(costumes=[("", 1)])
         self.run_frames(w, [], 1)
