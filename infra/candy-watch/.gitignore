@@ -1,0 +1,6 @@
+# The Home Alone clip is from a copyrighted film and this repo is public:
+# ./jasbros candy clip puts your copy here, and it never leaves this laptop
+# except into gmk's cluster. See docs/candy-watch.md.
+clip/*
+!clip/README.md
+__pycache__/

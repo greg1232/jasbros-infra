@@ -6,6 +6,8 @@ requires-python = ">=3.12"
 dependencies = [
     "ansible-core>=2.21,<2.22",
     "pyyaml>=6",
+    # ./jasbros candy clip
+    "yt-dlp",
 ]
 
 [build-system]

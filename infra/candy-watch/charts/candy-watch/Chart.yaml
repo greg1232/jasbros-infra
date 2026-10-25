@@ -1,0 +1,6 @@
+apiVersion: v2
+name: candy-watch
+description: A camera on the candy box, and a speaker that notices. See docs/candy-watch.md.
+type: application
+version: 0.1.0
+appVersion: "0.1.0"

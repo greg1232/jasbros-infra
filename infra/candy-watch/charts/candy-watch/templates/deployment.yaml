@@ -1,0 +1,45 @@
+{{- if not .Values.image.tag }}
+{{- fail "image.tag is empty — deploy with ./jasbros candy deploy" }}
+{{- end }}
+{{- if not .Values.speaker.url }}
+{{- fail "speaker.url is empty — deploy with ./jasbros candy deploy" }}
+{{- end }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "candy.name" . }}
+  labels: {{- include "candy.labels" . | nindent 4 }}
+spec:
+  replicas: 1
+  selector:
+    matchLabels: {{- include "candy.labels" . | nindent 6 }}
+  template:
+    metadata:
+      labels: {{- include "candy.labels" . | nindent 8 }}
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        seccompProfile: { type: RuntimeDefault }
+      containers:
+        - name: candy-watch
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          env:
+            - name: SPEAKER
+              value: "{{ .Values.speaker.name }}={{ .Values.speaker.url }}"
+            - { name: PORT, value: "8000" }
+          ports:
+            - { name: http, containerPort: 8000 }
+          readinessProbe:
+            httpGet: { path: /healthz, port: http }
+            periodSeconds: 10
+          livenessProbe:
+            httpGet: { path: /healthz, port: http }
+            periodSeconds: 30
+          resources: {{- toYaml .Values.resources | nindent 12 }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: { drop: [ALL] }

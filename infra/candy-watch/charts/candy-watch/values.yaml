@@ -1,0 +1,19 @@
+# Deployed by ./jasbros candy deploy, which sets image.tag and fills in the
+# speaker's address from infra/inventory.yaml.
+
+image:
+  repository: docker.io/gdiamos/candy-watch
+  tag: ""
+  pullPolicy: IfNotPresent
+
+speaker:
+  name: pi4
+  url: ""                 # http://<address>:8080, from the inventory
+
+ingress:
+  enabled: true
+  path: /candy
+
+resources:
+  requests: { cpu: 20m, memory: 32Mi }
+  limits: { cpu: 500m, memory: 128Mi }
