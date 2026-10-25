@@ -10,7 +10,12 @@ your guts full of lead!").
 It's an app like the fleet dashboard: Python in a pod on gmk, its own Helm
 chart, with source in `infra/candy-watch/`.
 
-**Status (2026-10-25):** step 1 is done. The pod runs on gmk at
+**Status (2026-10-25):** the dashboard is live at `http://192.168.4.108/candy`
+and **on gmk's screen**: the camera's live view (every 2 s while someone is
+looking), the rule, what's happening, and test controls. The camera is the
+**Reolink E1 Outdoor Pro "Front Yard" at `192.168.4.107`** (4K, pan-tilt-zoom,
+wall powered), reached over its HTTP API. It isn't aimed at the candy box yet.
+Step 1 is done. The pod runs on gmk at
 `http://192.168.4.108/candy`, and `./jasbros candy say …` / `--gangster`
 makes pi4 talk through it. `./jasbros candy demo scary witch` runs the
 whole interaction on pi4 (welcome with the costume → call-out → wait →
@@ -113,15 +118,31 @@ is **never committed or downloaded by the project**. Two ways to play it:
    on `192.168.4.0/22`. That's a small change to `src/dashboard.py`, deployed
    like `/api/version` was.
 
-### The camera: Reolink
+### The camera: Reolink (connected)
 
-Reolink cameras serve stills over HTTP
-(`/cgi-bin/api.cgi?cmd=Snap&channel=0&user=…&password=…`) and video over
-RTSP. Snapshots are all this needs, with no video decoding in the pod. The
-camera's username and password go in a Kubernetes Secret, created from the
-laptop (`./jasbros candy camera --host … --user …`), never in git. Until the
-Reolink is connected, a test mode takes frames from files, so the whole
-pipeline can be tested without it.
+What finding it took, for next time:
+
+- Current Reolink firmware ships with **HTTP, HTTPS and RTSP off**, leaving
+  only its own port 9000. A scan for camera ports finds nothing, and
+  several Google/Nest devices also listen on 9000 (they answer with a TLS
+  alert). It was `.107`, MAC from a contract manufacturer (GSD Viet Nam),
+  not Reolink's own `ec:71:db`. Turning **HTTP** on in the app
+  (⚙️ → Network → Advanced → Server Settings) made it answer
+  `"please login first"` on `/api.cgi`.
+- The HTTP API only takes **users on the camera** (⚙️ → User Management),
+  not the Reolink cloud account. `rspCode -7` means a wrong login.
+  **Five failures lock it**, so nothing here retries a refused login. The
+  pod waits 10 minutes after one.
+- `Snap` with `&width=640&height=360` gives the sub stream: 40 KB in 0.6 s,
+  against 1.3 MB for 4K. Other sizes are ignored. The live view uses the
+  small one, and counting will use full 4K stills.
+
+The login is in `~/.config/jasbros/reolink.env` (mode 600) on the laptop.
+`./jasbros candy camera` checks it, saves a snapshot to the gitignored
+`clip/` folder, and puts it in the cluster as the Secret `candy-watch-camera`,
+built in Python and piped in so the password is never on a command line.
+The chart reads it with `envFrom` (`optional`). The camera's address is in
+`infra/inventory.yaml` under `cameras`.
 
 ## Plan
 

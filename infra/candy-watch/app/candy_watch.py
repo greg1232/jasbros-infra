@@ -115,6 +115,98 @@ def gangster(speaker: Speaker, here: str, clip: Path = CLIP) -> dict:
     return speaker.say(GANGSTER)
 
 
+class Camera:
+    """A Reolink, over its HTTP API: one login, then snapshots on its token.
+
+    Reolinks lock the login after five failures, and a pod restarting in a
+    loop would spend those in seconds — so after a refused login this does
+    not ask again for ten minutes, whatever happens.
+
+    Frames are kept in memory, newest only, and never written anywhere
+    (docs/candy-watch.md, privacy).
+    """
+
+    SIZE = "&width=640&height=360"      # its sub stream: 40 KB, 0.6 s
+    WAIT_AFTER_REFUSAL = 600
+
+    def __init__(self, host: str, user: str, password: str,
+                 call=None, fetch=None, clock=time.time):
+        self.host, self.user, self.password = host, user, password
+        self.call = call or self._call
+        self.fetch = fetch or self._fetch
+        self.clock = clock
+        self.token = ""
+        self.refused_at = 0.0
+        self.error = ""
+        self.frame: bytes = b""
+        self.frame_at = 0.0
+        self.lock = threading.Lock()
+
+    def _call(self, cmd: str, params: dict) -> list:
+        body = json.dumps([{"cmd": cmd, "action": 0, "param": params}]).encode()
+        url = f"http://{self.host}/api.cgi?cmd={cmd}" + (
+            f"&token={self.token}" if self.token else "")
+        with urllib.request.urlopen(urllib.request.Request(
+                url, data=body, headers={"Content-Type": "application/json"}),
+                timeout=10) as reply:
+            return json.loads(reply.read())
+
+    def _fetch(self, url: str) -> tuple[str, bytes]:
+        with urllib.request.urlopen(url, timeout=10) as reply:
+            return reply.headers.get("Content-Type", ""), reply.read()
+
+    def login(self) -> bool:
+        if self.clock() - self.refused_at < self.WAIT_AFTER_REFUSAL:
+            return False
+        answer = self.call("Login", {"User": {
+            "Version": "0", "userName": self.user, "password": self.password}})
+        if answer[0].get("code") != 0:
+            self.refused_at = self.clock()
+            self.error = ("the camera refused the login — not asking again "
+                          "for ten minutes (it locks after five)")
+            print(f"[candy] {self.error}", flush=True)
+            return False
+        self.token = answer[0]["value"]["Token"]["name"]
+        return True
+
+    def snap(self) -> bytes | None:
+        """The newest frame, or None. Logs in when it has to, and once more
+        if the token has run out — never in a loop."""
+        with self.lock:
+            for attempt in (1, 2):
+                if not self.token and not self.login():
+                    return None
+                try:
+                    kind, data = self.fetch(
+                        f"http://{self.host}/cgi-bin/api.cgi?cmd=Snap"
+                        f"&channel=0&rs=candy{int(self.clock())}{self.SIZE}"
+                        f"&token={self.token}")
+                except Exception as error:
+                    self.error = f"can't reach the camera — {type(error).__name__}"
+                    return None
+                if kind.startswith("image/"):
+                    self.frame, self.frame_at, self.error = (data,
+                                                             self.clock(), "")
+                    return data
+                self.token = ""         # expired: one fresh login, then stop
+            self.error = "the camera answered, but not with a picture"
+            return None
+
+    def status(self) -> dict:
+        return {"host": self.host, "error": self.error,
+                "frame_at": self.frame_at, "ok": bool(self.frame)
+                and not self.error}
+
+
+def keep_looking(camera: "Camera", watched, every: float = 2) -> None:
+    """A frame every couple of seconds while someone is looking at the page
+    (gmk's screen always is) — and none at all while nobody is."""
+    while True:
+        if watched():
+            camera.snap()
+        time.sleep(every)
+
+
 def _get_json(url: str, timeout: float) -> dict | None:
     try:
         with urllib.request.urlopen(url, timeout=timeout) as reply:
@@ -142,47 +234,139 @@ def _post_json(url: str, body: dict, timeout: float) -> dict | None:
 
 PAGE = """<!doctype html><meta charset=utf-8>
 <meta name=viewport content="width=device-width,initial-scale=1">
-<title>Candy watch</title>
+<title>Candy computer</title>
 <style>
-:root{color-scheme:light dark;--edge:#8883;--dim:#8889}
-body{font:15px/1.5 system-ui,sans-serif;margin:0;padding:1.5rem 1rem}
-main{max-width:36rem;margin:0 auto}
-h1{font-size:1.15rem;margin:0 0 .25rem}
-.sub{color:var(--dim);font-size:.85rem;margin-bottom:1.25rem}
-button{font:inherit;padding:.55rem .9rem;border-radius:9px;
-  border:1px solid var(--edge);background:transparent;cursor:pointer}
+:root{color-scheme:dark;--bg:#0f0d0b;--card:#1a1612;--edge:#3a2f25;
+  --ink:#f3ebe1;--dim:#a8998a;--pumpkin:#ff8a1f;--good:#5bc46b;--bad:#ef5b4c}
+*{box-sizing:border-box}
+body{font:16px/1.5 system-ui,sans-serif;margin:0;padding:1.25rem;
+  background:var(--bg);color:var(--ink)}
+main{max-width:120rem;margin:0 auto}
+h1{font-size:1.6rem;margin:0;letter-spacing:.01em}
+h1 span{color:var(--pumpkin)}
+.sub{color:var(--dim);font-size:.9rem;margin:.2rem 0 1rem}
+.grid{display:grid;grid-template-columns:minmax(0,2.2fr) minmax(0,1fr);gap:1rem}
+@media (max-width:52rem){.grid{grid-template-columns:minmax(0,1fr)}}
+.card{background:var(--card);border:1px solid var(--edge);border-radius:14px;
+  padding:1rem 1.1rem;margin-bottom:1rem}
+.card h2{font-size:.78rem;text-transform:uppercase;letter-spacing:.08em;
+  color:var(--dim);margin:0 0 .6rem;font-weight:600}
+.view{position:relative;aspect-ratio:16/9;background:#000;border-radius:10px;
+  overflow:hidden}
+.view img{width:100%;height:100%;object-fit:cover;display:block}
+.view .note{position:absolute;inset:0;display:grid;place-items:center;
+  color:var(--dim);text-align:center;padding:1rem}
+.live{display:flex;align-items:center;gap:.45rem;font-size:.85rem;
+  color:var(--dim);margin-top:.5rem}
+.dot{width:.6rem;height:.6rem;border-radius:50%;background:var(--bad)}
+.dot.on{background:var(--good)}
+.rule{font-size:2.4rem;font-weight:700;line-height:1.15;margin:.2rem 0}
+.rule small{display:block;font-size:.95rem;font-weight:400;color:var(--dim)}
+ol{margin:0;padding-left:1.2rem}
+ol li{margin:.35rem 0;color:var(--dim)}
+ol li:last-child{color:var(--ink);font-weight:600}
+.idle{color:var(--dim)}
+details summary{cursor:pointer;color:var(--dim);font-size:.85rem}
 input{font:inherit;padding:.5rem .6rem;border-radius:9px;width:100%;
   border:1px solid var(--edge);background:transparent;color:inherit;
-  box-sizing:border-box;margin-bottom:.5rem}
-#out{margin-top:1rem;color:var(--dim);font-size:.9rem}
+  margin:.5rem 0}
+button{font:inherit;padding:.5rem .85rem;border-radius:9px;margin:0 .3rem .3rem 0;
+  border:1px solid var(--edge);background:transparent;color:inherit;cursor:pointer}
+button:hover{border-color:var(--pumpkin)}
+#out{color:var(--dim);font-size:.85rem;margin-top:.4rem}
 </style>
 <main>
-<h1>Candy watch</h1>
-<div class=sub>Speaking through <b id=who></b>. <span id=clip></span>
-No camera yet.</div>
-<input id=text maxlength=200 placeholder="Something for the speaker to say">
-<button onclick="say({text:document.getElementById('text').value})">Say it</button>
-<button onclick="say({line:'gangster'})">The gangster line</button>
-<input id=costume maxlength=60 placeholder="Their costume, e.g. scary witch">
-<button onclick="say({wait:10, costume:document.getElementById('costume').value},
-  'api/demo')">The whole thing</button>
-<div id=out></div>
+<h1>JAS Brothers <span>Halloween</span> candy computer</h1>
+<div class=sub id=sub>&nbsp;</div>
+<div class=grid>
+  <div>
+    <div class=card>
+      <div class=view><img id=frame alt="The candy box, live">
+        <div class=note id=note>Looking for the camera…</div></div>
+      <div class=live><span class=dot id=dot></span><span id=live>&nbsp;</span></div>
+    </div>
+  </div>
+  <div>
+    <div class=card>
+      <div class=rule>Two candies each.<small>Take more, and the computer
+        will notice.</small></div>
+    </div>
+    <div class=card>
+      <h2>What's happening</h2>
+      <div id=now class=idle>Watching the candy box.</div>
+    </div>
+    <div class=card>
+      <details><summary>Test it</summary>
+        <input id=costume maxlength=60 placeholder="Their costume, e.g. scary witch">
+        <button onclick="act('api/demo', {wait: 10,
+          costume: document.getElementById('costume').value})">The whole thing</button>
+        <button onclick="act('api/say', {line: 'gangster'})">The gangster</button>
+        <input id=text maxlength=200 placeholder="Something to say">
+        <button onclick="act('api/say', {text:
+          document.getElementById('text').value})">Say it</button>
+        <div id=out></div>
+      </details>
+    </div>
+  </div>
+</div>
 </main>
 <script>
+// Served under /candy through the ingress and at / when run directly.
 const base = location.pathname.endsWith('/') ? location.pathname
                                              : location.pathname + '/';
-fetch(base + 'api/status').then(r => r.json()).then(d => {
-  document.getElementById('who').textContent = d.speaker;
-  document.getElementById('clip').textContent = d.clip
-    ? 'The film clip is here.' : 'No film clip yet, so the speaker says the line.';
-});
-async function say(body, where = 'api/say') {
+const $ = id => document.getElementById(id);
+const esc = s => String(s ?? '').replace(/[&<>"']/g,
+  c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+let shown = null;
+
+async function frame() {
+  try {
+    const r = await fetch(base + 'api/frame.jpg', {cache: 'no-store'});
+    if (!r.ok) throw new Error(await r.text());
+    const url = URL.createObjectURL(await r.blob());
+    $('frame').src = url;
+    if (shown) URL.revokeObjectURL(shown);
+    shown = url;
+    $('note').style.display = 'none';
+  } catch (e) {
+    $('note').style.display = 'grid';
+    $('note').textContent = String(e.message || e).trim() || 'No picture yet.';
+  }
+}
+
+async function status() {
+  let d;
+  try { d = await (await fetch(base + 'api/status', {cache: 'no-store'})).json(); }
+  catch (e) { $('sub').textContent = 'Can’t reach the candy computer — retrying.'; return; }
+  const cam = d.camera || {};
+  $('sub').textContent = `Speaking through ${d.speaker} · ` +
+    (d.clip ? 'film clip ready' : 'no film clip, so the speaker says the line') +
+    (cam.host ? ` · camera ${cam.host}` : ' · no camera');
+  const age = cam.frame_at ? Math.round(d.now - cam.frame_at) : null;
+  const ok = cam.ok && age !== null && age < 15;
+  $('dot').className = 'dot' + (ok ? ' on' : '');
+  $('live').textContent = cam.error ? cam.error
+    : age === null ? 'waiting for the first picture'
+    : ok ? 'live' : `last picture ${age} s ago`;
+  const demo = d.demo || {};
+  $('now').innerHTML = demo.steps && demo.steps.length
+    ? `<ol>${demo.steps.map(s => `<li>${esc(s)}</li>`).join('')}</ol>` +
+      (demo.running ? '' : '<div class=idle style="margin-top:.5rem">Done. Watching again.</div>')
+    : 'Watching the candy box.';
+  $('now').className = demo.steps && demo.steps.length ? '' : 'idle';
+}
+
+async function act(where, body) {
   const r = await fetch(base + where, {method: 'POST',
     headers: {'Content-Type': 'application/json'}, body: JSON.stringify(body)});
   const d = await r.json();
-  document.getElementById('out').textContent =
-    (d.ok ? '✓ ' : '✗ ') + d.speaker + ': ' + d.said;
+  $('out').textContent = (d.ok ? '✓ ' : '✗ ') + (d.speaker || '') + ': ' + d.said;
+  status();
 }
+
+frame(); status();
+setInterval(frame, 2000);
+setInterval(status, 2000);
 </script>
 """
 
@@ -228,10 +412,26 @@ class Interaction:
             self.running = False
 
 
-def serve(speaker: Speaker, port: int, here: str = "",
-          clip: Path = CLIP) -> http.server.ThreadingHTTPServer:
+class Watched:
+    """When the page last asked for anything — frames are only fetched
+    while somebody is looking."""
+
+    def __init__(self, clock=time.time):
+        self.clock, self.at = clock, 0.0
+
+    def touch(self) -> None:
+        self.at = self.clock()
+
+    def __call__(self) -> bool:
+        return self.clock() - self.at < 30
+
+
+def serve(speaker: Speaker, port: int, here: str = "", clip: Path = CLIP,
+          camera: "Camera | None" = None,
+          watched: "Watched | None" = None) -> http.server.ThreadingHTTPServer:
     """`here` is this app as the speakers reach it: http://<gmk>/candy."""
     interaction = Interaction(speaker, here, clip)
+    watched = watched or Watched()
     class Pages(http.server.BaseHTTPRequestHandler):
         protocol_version = "HTTP/1.1"
 
@@ -240,8 +440,21 @@ def serve(speaker: Speaker, port: int, here: str = "",
             if path in ("/", "/index.html"):
                 return self._send(200, PAGE.encode(),
                                   "text/html; charset=utf-8")
+            if path == "/api/frame.jpg":
+                watched.touch()
+                if camera is None:
+                    return self._send(503, b"No camera is set up.",
+                                      "text/plain")
+                if not camera.frame:
+                    return self._send(503, (camera.error or "Waiting for the "
+                                            "first picture.").encode(),
+                                      "text/plain")
+                return self._send(200, camera.frame, "image/jpeg")
             if path == "/api/status":
-                return self._json({"speaker": speaker.name,
+                watched.touch()
+                return self._json({"now": time.time(),
+                                   "camera": camera.status() if camera else {},
+                                   "speaker": speaker.name,
                                    "speaker_url": speaker.url,
                                    "clip": clip.is_file(),
                                    "last": speaker.last,
@@ -315,7 +528,18 @@ def main() -> None:
           f":{args.port}", flush=True)
     print(f"[candy] clip: {CLIP if CLIP.is_file() else 'none'}; "
           f"speakers fetch from {args.here or 'nowhere'}", flush=True)
-    server = serve(speaker, args.port, args.here.rstrip("/"))
+    camera = None
+    if os.environ.get("REOLINK_HOST"):
+        camera = Camera(os.environ["REOLINK_HOST"],
+                        os.environ.get("REOLINK_USER", ""),
+                        os.environ.get("REOLINK_PASSWORD", ""))
+        print(f"[candy] camera at {camera.host}", flush=True)
+    watched = Watched()
+    server = serve(speaker, args.port, args.here.rstrip("/"), CLIP, camera,
+                   watched)
+    if camera:
+        threading.Thread(target=keep_looking, args=(camera, watched),
+                         daemon=True).start()
     threading.Thread(target=server.serve_forever, daemon=True).start()
     while True:
         time.sleep(3600)

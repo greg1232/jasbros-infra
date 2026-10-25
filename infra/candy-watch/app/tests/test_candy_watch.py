@@ -173,6 +173,98 @@ class Welcome(unittest.TestCase):
                              candy_watch.SAY_LIMIT)
 
 
+class FakeCamera:
+    """A Reolink: logins checked against one password, tokens that can run out."""
+
+    def __init__(self, password="right"):
+        self.password, self.logins, self.snaps = password, 0, 0
+        self.token_good = True
+
+    def call(self, cmd, params):
+        self.logins += 1
+        if params["User"]["password"] != self.password:
+            return [{"code": 1, "error": {"detail": "login failed"}}]
+        self.token_good = True
+        return [{"code": 0, "value": {"Token": {"name": f"t{self.logins}"}}}]
+
+    def fetch(self, url):
+        self.snaps += 1
+        if not self.token_good:
+            return "text/html", b'[{"code": 1}]'
+        return "image/jpeg", b"\xff\xd8jpeg"
+
+
+class Cameras(unittest.TestCase):
+    def setUp(self):
+        self.clock = Clock()
+
+    def camera(self, fake, password="right"):
+        return candy_watch.Camera("10.0.0.7", "solus", password, fake.call,
+                                  fake.fetch, self.clock)
+
+    def test_logs_in_once_then_snaps_on_the_token(self):
+        fake = FakeCamera()
+        camera = self.camera(fake)
+        for _ in range(5):
+            self.assertEqual(camera.snap(), b"\xff\xd8jpeg")
+        self.assertEqual(fake.logins, 1)
+        self.assertTrue(camera.status()["ok"])
+
+    def test_an_expired_token_gets_one_fresh_login(self):
+        fake = FakeCamera()
+        camera = self.camera(fake)
+        camera.snap()
+        fake.token_good = False
+        self.assertEqual(camera.snap(), b"\xff\xd8jpeg")
+        self.assertEqual(fake.logins, 2)
+
+    def test_a_refused_login_is_not_tried_again_for_ten_minutes(self):
+        # The camera locks after five; a loop would spend them in seconds.
+        fake = FakeCamera()
+        camera = self.camera(fake, password="wrong")
+        for _ in range(100):
+            self.assertIsNone(camera.snap())
+            self.clock.tick(5)
+        self.assertEqual(fake.logins, 1)
+        self.assertIn("refused", camera.status()["error"])
+        self.clock.tick(600)
+        camera.snap()
+        self.assertEqual(fake.logins, 2)
+
+    def test_a_camera_that_answers_wrong_twice_stops_there(self):
+        fake = FakeCamera()
+        camera = self.camera(fake)
+        fake.call = lambda cmd, p: [{"code": 0, "value": {"Token": {"name": "t"}}}]
+        camera.call = fake.call
+        fake.token_good = False
+        fake.fetch = lambda url: ("text/html", b"no")
+        camera.fetch = fake.fetch
+        self.assertIsNone(camera.snap())
+        self.assertIn("not with a picture", camera.error)
+
+
+class Clock:
+    def __init__(self):
+        self.now = 1_800_000_000.0
+
+    def __call__(self):
+        return self.now
+
+    def tick(self, seconds):
+        self.now += seconds
+
+
+class Watching(unittest.TestCase):
+    def test_only_while_someone_is_looking(self):
+        clock = Clock()
+        watched = candy_watch.Watched(clock)
+        self.assertFalse(watched())
+        watched.touch()
+        self.assertTrue(watched())
+        clock.tick(31)
+        self.assertFalse(watched())
+
+
 class Page(unittest.TestCase):
     def test_say_and_gangster_over_http(self):
         fake = FakeSpeaker()
@@ -194,8 +286,13 @@ class Page(unittest.TestCase):
                              candy_watch.GANGSTER)
             with urllib.request.urlopen(base + "/api/status") as r:
                 self.assertEqual(json.loads(r.read())["speaker"], "pi4")
+            try:
+                urllib.request.urlopen(base + "/api/frame.jpg")
+            except urllib.error.HTTPError as e:
+                with e:
+                    self.assertEqual(e.code, 503)     # no camera set up
             with urllib.request.urlopen(base + "/") as r:
-                self.assertIn(b"Candy watch", r.read())
+                self.assertIn(b"Halloween</span> candy computer", r.read())
         finally:
             server.shutdown()
             server.server_close()

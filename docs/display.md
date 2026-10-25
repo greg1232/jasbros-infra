@@ -1,6 +1,7 @@
 # gmk display — a standard desktop with a browser
 
 **Built and running (2026-10-25):** the `display` role in `infra/gmk/roles/display`.
+The screen currently shows **candy watch** (`display_url: http://localhost/candy`).
 The voice switching described below (display-agent, the speaker's screen
 tool) is **not built yet**.
 

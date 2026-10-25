@@ -26,6 +26,12 @@ spec:
         - name: candy-watch
           image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
           imagePullPolicy: {{ .Values.image.pullPolicy }}
+          # The camera's address and login, from ./jasbros candy camera.
+          # Optional: without it there's no picture, and everything else works.
+          envFrom:
+            - secretRef:
+                name: {{ include "candy.name" . }}-camera
+                optional: true
           env:
             - name: SPEAKER
               value: "{{ .Values.speaker.name }}={{ .Values.speaker.url }}"

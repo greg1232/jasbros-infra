@@ -25,7 +25,7 @@ ansible_become_exe: sudo.ws
 
 # gmk's screen (docs/display.md): who is logged in, and what Firefox opens.
 display_user: display
-display_url: http://localhost/speakers
+display_url: http://localhost/candy
 # Firefox's kiosk mode: the whole screen, no address bar or tabs. Links on
 # the page still work. false gives an ordinary window.
 display_fullscreen: true

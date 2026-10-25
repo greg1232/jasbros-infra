@@ -11,7 +11,7 @@ import urllib.request
 import webbrowser
 from pathlib import Path
 
-from . import apps
+from . import apps, inventory
 from .common import INFRA, KUBECONFIG, VENV, fail, kube_env, need, run, say
 
 HERE = INFRA / "candy-watch"
@@ -64,6 +64,81 @@ def demo(args) -> int:
         return fail(f"couldn't reach candy watch at {APP.url()}: {error}")
     say(f"{answer.get('speaker', '')}: {answer['said']}")
     return 0 if answer["ok"] else 1
+
+
+LOGIN = Path.home() / ".config" / "jasbros" / "reolink.env"
+
+
+def _login() -> dict:
+    if not LOGIN.is_file():
+        raise SystemExit(f"[jasbros] no camera login — put REOLINK_USER= and "
+                         f"REOLINK_PASSWORD= in {LOGIN} (chmod 600)")
+    if LOGIN.stat().st_mode & 0o077:
+        raise SystemExit(f"[jasbros] {LOGIN} is readable by others — "
+                         f"chmod 600 {LOGIN}")
+    return dict(line.strip().split("=", 1) for line in LOGIN.read_text()
+                .splitlines() if "=" in line)
+
+
+def snapshot(address: str, login: dict) -> bytes:
+    """One still from a Reolink, over its HTTP API (which must be on)."""
+    def call(cmd: str, params: dict, token: str = "") -> list:
+        body = json.dumps([{"cmd": cmd, "action": 0, "param": params}]).encode()
+        url = f"http://{address}/api.cgi?cmd={cmd}" + (
+            f"&token={token}" if token else "")
+        with urllib.request.urlopen(urllib.request.Request(
+                url, data=body, headers={"Content-Type": "application/json"}),
+                timeout=10) as reply:
+            return json.loads(reply.read())
+
+    answer = call("Login", {"User": {"Version": "0",
+                                     "userName": login["REOLINK_USER"],
+                                     "password": login["REOLINK_PASSWORD"]}})
+    if answer[0].get("code") != 0:
+        # Reolinks lock the login after five failures, so this never retries.
+        raise SystemExit(f"[jasbros] the camera refused the login "
+                         f"({answer[0].get('error', {}).get('detail')}) — "
+                         f"check {LOGIN}. Not retrying: it locks after five.")
+    token = answer[0]["value"]["Token"]["name"]
+    try:
+        with urllib.request.urlopen(
+                f"http://{address}/cgi-bin/api.cgi?cmd=Snap&channel=0"
+                f"&rs=jasbros&token={token}", timeout=15) as reply:
+            return reply.read()
+    finally:
+        call("Logout", {}, token)
+
+
+def camera(args) -> int:
+    """Check the camera, save a snapshot, and give candy watch the login."""
+    name, values = inventory.pick(args.camera, "cameras")
+    login = _login()
+    picture = snapshot(values["ansible_host"], login)
+    out = HERE / "clip" / f"{name}.jpg"           # gitignored, like the clip
+    out.write_bytes(picture)
+    say(f"{name} ({values.get('model', 'camera')}) at "
+        f"{values['ansible_host']}: snapshot {len(picture) // 1024} KB → "
+        f"{out.relative_to(INFRA.parent)}")
+    if args.no_secret:
+        return 0
+    # Built here and piped in, so the password is never on a command line.
+    secret = {"apiVersion": "v1", "kind": "Secret",
+              "metadata": {"name": f"{APP.name}-camera",
+                           "namespace": APP.namespace},
+              "type": "Opaque",
+              "stringData": {"REOLINK_HOST": values["ansible_host"],
+                             "REOLINK_USER": login["REOLINK_USER"],
+                             "REOLINK_PASSWORD": login["REOLINK_PASSWORD"]}}
+    code = subprocess.run(
+        ["kubectl", "apply", "--server-side", "--field-manager=jasbros",
+         "-f", "-"], input=json.dumps(secret), env=kube_env(), text=True,
+        capture_output=True).returncode
+    if code:
+        return fail("couldn't put the camera login in the cluster")
+    say(f"camera login in the cluster as secret {APP.name}-camera")
+    if shutil.which("open") and not args.no_open:
+        run(["open", str(out)])
+    return 0
 
 
 def clip(args) -> int:
@@ -179,6 +254,15 @@ def add_parser(sub) -> None:
     p.add_argument("--wait", type=float, default=10,
                    help="seconds to wait for the candy to come back")
     p.set_defaults(func=demo)
+
+    p = commands.add_parser("camera", help="check the camera, snapshot it, "
+                            "and give candy watch its login")
+    p.add_argument("camera", nargs="?", default="front-yard")
+    p.add_argument("--no-secret", action="store_true",
+                   help="just the snapshot")
+    p.add_argument("--no-open", action="store_true",
+                   help="don't open the snapshot")
+    p.set_defaults(func=camera)
 
     p = commands.add_parser("clip", help="get the Home Alone clip and put "
                             "it in the cluster")
