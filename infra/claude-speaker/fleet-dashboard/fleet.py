@@ -302,10 +302,12 @@ class Fleet:
         remembered = store.addresses()
         self.speakers: dict[str, Speaker] = {}
         for entry in self.config["speakers"]:
-            base, moved = remembered.get(entry["name"], (entry["url"], None))
+            hint = entry["url"].rstrip("/")
+            base, moved = remembered.get(entry["name"], (hint, None))
+            if base.rstrip("/") == hint:
+                moved = None        # the inventory has caught up with it
             self.speakers[entry["name"]] = Speaker(
-                entry["name"], base.rstrip("/"), entry["url"].rstrip("/"),
-                moved_from=moved)
+                entry["name"], base.rstrip("/"), hint, moved_from=moved)
         self.lock = threading.Lock()
 
     # -- polling

@@ -241,6 +241,10 @@ class Moving(unittest.TestCase):
             self.assertEqual(again.speakers["bedroom"].base,
                              "http://10.0.0.9:8080")
             self.assertEqual(again.speakers["bedroom"].moved_from, "10.0.0.2")
+            # Once the inventory says where it really is, it isn't news.
+            caught_up = make([("bedroom", "10.0.0.9")], self.network,
+                             self.clock, db)
+            self.assertIsNone(caught_up.speakers["bedroom"].moved_from)
 
 
 class Problems(unittest.TestCase):
