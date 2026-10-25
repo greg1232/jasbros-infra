@@ -45,7 +45,8 @@ def say_(args) -> int:
             answer = json.loads(reply.read())
     except Exception as error:
         return fail(f"couldn't reach candy watch at {APP.url()}: {error}")
-    say(f"{answer['speaker']}: {answer['said']}  ({answer.get('text', '')!r})")
+    what = answer.get("url") or repr(answer.get("text", ""))
+    say(f"{answer['speaker']}: {answer['said']}  ({what})")
     return 0 if answer["ok"] else 1
 
 

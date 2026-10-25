@@ -10,7 +10,8 @@ chart, with source in `infra/candy-watch/`.
 
 **Status (2026-10-25):** step 1 is done. The pod runs on gmk at
 `http://192.168.4.108/candy`, and `./jasbros candy say …` / `--gangster`
-makes pi4 talk through it. The clip downloader is built. Steps 2–5 are design.
+makes pi4 talk through it. `--gangster` plays **the film clip** on pi4
+(35 s, 1:21–1:56), or says the line if the clip isn't there. Steps 2–5 are design.
 
 ## How it works
 
@@ -81,14 +82,25 @@ every time, and so it can use what the speaker knows (`HOUSEHOLD` names):
 The audio is from a copyrighted film, and this repo is public, so the clip
 is **never committed or downloaded by the project**. Two ways to play it:
 
-1. **Speaker voice (step 1, built):** the speaker *says* the line in its
-   own Piper voice. Nothing to supply.
+1. **Speaker voice (built, the fallback):** the speaker *says* the line in
+   its own Piper voice. It's used when there's no clip, or the speaker is on
+   code too old to play one.
 2. **The real clip (later):** `./jasbros candy clip` downloads it from the
    scene on YouTube (`hj_XtWtOOzA`, 1:21–1:56, the defaults in
    `cli/jasbros_cli/candy.py`; another URL and `--start/--end` can be given)
    with `yt-dlp` and `ffmpeg`. It writes a 16 kHz mono WAV to
-   `infra/candy-watch/clip/home-alone.wav`, which is gitignored. Getting
-   it into the cluster is the next part of this step. The pod
+   `infra/candy-watch/clip/home-alone.wav`, which is gitignored. **Built.**
+   Then it puts the clip in the cluster: FLAC (584 KB, lossless) in a
+   ConfigMap `candy-watch-clip` made from the laptop with server-side apply,
+   since the client-side kind copies it into a 256 KB annotation. The chart
+   only mounts it (`optional`), so the clip never goes through git.
+   The pod serves it at `/candy/clip/home-alone.flac`, and tells the speaker
+   to fetch it from gmk's address, which it reads from Kubernetes
+   (`status.hostIP`).
+3. **The speaker's `play` action (built):** `{"what": "play", "value": url}`
+   plays a recording only from a *numbered private* address (no names, no
+   internet, `http` only), up to 8 MB. "Stop" stops it: `tts.play_clip`
+   now plays a quarter-second at a time. The pod
    serves it on the LAN, and the speaker gets one new action,
    `{"what": "play", "value": "<url>"}`, which plays a WAV from an address
    on `192.168.4.0/22`. That's a small change to `src/dashboard.py`, deployed
