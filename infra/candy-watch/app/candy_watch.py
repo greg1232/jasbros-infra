@@ -264,6 +264,12 @@ body{font:16px/1.5 system-ui,sans-serif;margin:0;padding:1.25rem;
 main{max-width:120rem;margin:0 auto}
 h1{font-size:1.6rem;margin:0;letter-spacing:.01em}
 h1 span{color:var(--pumpkin)}
+.top{display:flex;justify-content:space-between;align-items:center;gap:1rem;
+  flex-wrap:wrap}
+.switch{font:inherit;font-weight:700;font-size:1rem;padding:.6rem 1.2rem;
+  border-radius:999px;cursor:pointer;border:2px solid var(--edge);
+  background:transparent;color:var(--dim);margin:0}
+.switch.on{background:var(--good);border-color:var(--good);color:#000}
 .sub{color:var(--dim);font-size:.9rem;margin:.2rem 0 1rem}
 .grid{display:grid;grid-template-columns:minmax(0,2.2fr) minmax(0,1fr);gap:1rem}
 @media (max-width:52rem){.grid{grid-template-columns:minmax(0,1fr)}}
@@ -312,7 +318,10 @@ button:hover{border-color:var(--pumpkin)}
 .small{color:var(--dim);font-size:.8rem}
 </style>
 <main>
-<h1>JAS Brothers <span>Halloween</span> candy computer</h1>
+<div class=top>
+  <h1>JAS Brothers <span>Halloween</span> candy computer</h1>
+  <button class=switch id=switch onclick="toggle()">…</button>
+</div>
 <div class=sub id=sub>&nbsp;</div>
 <div class=grid>
   <div>
@@ -409,11 +418,18 @@ async function status() {
       `</span></div>`;
   }).join('');
   if (w) {
+    $('switch').className = 'switch' + (w.on ? ' on' : '');
+    $('switch').textContent = w.on ? 'Watching — on' : 'Switched off';
+    $('switch').title = w.on ? 'Click to stop greeting people and asking Claude'
+                             : 'Click to start greeting trick-or-treaters';
     $('groups').className = w.groups.length ? '' : 'idle';
     $('groups').innerHTML = w.groups.length ? w.groups.map(g =>
       `<div class=group><b style="color:${colour(g.id)}">Group ${g.id}</b> · ` +
       `${g.kids} ${g.kids === 1 ? 'person' : 'people'} · ` +
       `${esc(g.costume) || '<span class=idle>looking…</span>'}</div>`).join('')
+      : !w.on ? (w.people.length ? 'Someone is there — switched off, so ' +
+                 'nobody is greeted.' : 'Switched off: watching, but not ' +
+                 'greeting anyone or asking Claude.')
       : (w.people.length ? 'Someone is walking up…' : 'Nobody at the box.');
     const show = v => v === null || v === undefined ? '–' : v;
     $('n-base').textContent = show(w.baseline);
@@ -436,6 +452,12 @@ async function status() {
       (demo.running ? '' : '<div class=idle style="margin-top:.5rem">Done. Watching again.</div>')
     : 'Watching the candy box.';
   $('now').className = demo.steps && demo.steps.length ? '' : 'idle';
+}
+
+async function toggle() {
+  const r = await fetch(base + 'api/status', {cache: 'no-store'});
+  const on = !((await r.json()).watch || {}).on;
+  await act('api/watch', {on});
 }
 
 async function act(where, body) {
@@ -563,6 +585,15 @@ def serve(speaker: Speaker, port: int, here: str = "", clip: Path = CLIP,
                 if body.get("line") == "gangster":
                     return self._json(gangster(speaker, here, clip))
                 return self._json(speaker.say(str(body.get("text", ""))))
+            if path == "/api/watch":
+                if watcher is None:
+                    return self._json({"ok": False,
+                                       "said": "Not watching: no camera."})
+                watcher.switch(bool(body.get("on")))
+                return self._json({"ok": True, "on": watcher.on,
+                                   "speaker": speaker.name,
+                                   "said": "Watching." if watcher.on
+                                   else "Switched off."})
             if path == "/api/demo":
                 # The whole interaction, with nobody putting anything back.
                 # On a thread: it takes a minute, and the page shouldn't wait.

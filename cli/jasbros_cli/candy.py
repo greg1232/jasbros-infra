@@ -142,6 +142,20 @@ def camera(args) -> int:
     return 0
 
 
+def switch(on: bool) -> int:
+    """Switch the watcher on (greet, count, call out) or off (just watch)."""
+    request = urllib.request.Request(
+        APP.url() + "/api/watch", data=json.dumps({"on": on}).encode(),
+        headers={"Content-Type": "application/json"})
+    try:
+        with urllib.request.urlopen(request, timeout=10) as reply:
+            answer = json.loads(reply.read())
+    except Exception as error:
+        return fail(f"couldn't reach candy watch at {APP.url()}: {error}")
+    say(answer["said"])
+    return 0 if answer["ok"] else 1
+
+
 def key(args) -> int:
     """Give candy watch the speakers' Claude API key, as a Secret."""
     env = INFRA / "claude-speaker" / ".env"
@@ -290,6 +304,10 @@ def add_parser(sub) -> None:
                    help="don't open the snapshot")
     p.set_defaults(func=camera)
 
+    commands.add_parser("on", help="start greeting trick-or-treaters"
+                        ).set_defaults(func=lambda args: switch(True))
+    commands.add_parser("off", help="stop greeting; just watch"
+                        ).set_defaults(func=lambda args: switch(False))
     commands.add_parser("key", help="give candy watch the Claude API key "
                         "(from the speakers' .env)").set_defaults(func=key)
 

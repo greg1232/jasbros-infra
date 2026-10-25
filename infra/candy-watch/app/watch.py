@@ -24,11 +24,17 @@ import base64
 import io
 import itertools
 import json
+import os
 import threading
 import time
 from dataclasses import dataclass, field
+from pathlib import Path
 
 from PIL import Image
+
+# Whether the watcher is switched on, kept on the pod's volume so a restart
+# on Halloween night doesn't quietly switch it off.
+STATE = Path(os.environ.get("STATE", "/data/state.json"))
 
 MODEL = "claude-opus-5-5"
 EACH = 2                        # candies each — the whole point
@@ -280,7 +286,7 @@ class Watcher:
                  forming_seconds: float = 3, gone_seconds: float = 4,
                  recount_every: float = 5, recounts_per_group: int = 6,
                  baseline_every: float = 1800, put_back_wait: float = 60,
-                 background=None):
+                 background=None, state: Path | None = STATE):
         self.camera, self.detector, self.eyes = camera, detector, eyes
         self.interaction, self.clock = interaction, clock
         self.tracker = Tracker(gone_seconds)
@@ -290,6 +296,8 @@ class Watcher:
         self.baseline_every, self.put_back_wait = (baseline_every,
                                                    put_back_wait)
         self.background = background or _thread
+        self.state = state
+        self.on = self._load_on()
         self.groups: dict[int, Group] = {}
         self.group_ids = itertools.count(1)
         self.calling_out = False
@@ -315,10 +323,11 @@ class Watcher:
         now = self.clock()
         with self.lock:
             for track in self.tracker.update(boxes, now):
-                self._join(track, now)
+                if self.on:
+                    self._join(track, now)
             self._end_groups()
-            if self.eyes is None:               # no key: people only
-                return
+            if self.eyes is None or not self.on:    # people only: no Claude,
+                return                              # nothing said
             if not self.looking:
                 self._next_look(now)
 
@@ -368,6 +377,42 @@ class Watcher:
                 self.baseline is None
                 or now - self.baseline_at >= self.baseline_every):
             self._look_soon(self._alone)
+
+    # -- the switch
+
+    def switch(self, on: bool) -> None:
+        """On: greet, count, call out. Off: just watch, ask Claude nothing.
+
+        Switching on starts afresh — whoever is already standing there
+        isn't greeted until they leave and come back, so switching it on
+        from the yard doesn't welcome the person doing it.
+        """
+        with self.lock:
+            if on == self.on:
+                return
+            self.on = on
+            self.groups.clear()
+            for track in self.tracker.tracks.values():
+                track.group = -1        # here before: not a newcomer
+            self.over, self.recounts = 0, 0
+            self.called_out.clear()
+            self._event("switched on" if on else "switched off")
+            self._save_on()
+
+    def _load_on(self) -> bool:
+        try:
+            return bool(json.loads(self.state.read_text()).get("on"))
+        except (OSError, ValueError, AttributeError):
+            return False                # off unless it was left on
+
+    def _save_on(self) -> None:
+        if self.state is None:
+            return
+        try:
+            self.state.parent.mkdir(parents=True, exist_ok=True)
+            self.state.write_text(json.dumps({"on": self.on}))
+        except OSError as error:
+            print(f"[candy] couldn't save the switch: {error}", flush=True)
 
     # -- the questions, to one side
 
@@ -486,7 +531,10 @@ class Watcher:
     def status(self) -> dict:
         with self.lock:
             return {
-                "people": [{"box": t.box, "id": t.id, "group": t.group}
+                "on": self.on,
+                "people": [{"box": t.box, "id": t.id,
+                            "group": t.group if t.group and t.group > 0
+                            else None}
                            for t in self.tracker.present()],
                 "groups": [{"id": g.id, "costume": g.costume, "kids": g.kids,
                             "baseline": g.baseline}

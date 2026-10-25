@@ -24,6 +24,7 @@ spec:
         runAsNonRoot: true
         runAsUser: 10001
         runAsGroup: 10001
+        fsGroup: 10001
         seccompProfile: { type: RuntimeDefault }
       containers:
         - name: candy-watch
@@ -44,6 +45,7 @@ spec:
             - name: SPEAKER
               value: "{{ .Values.speaker.name }}={{ .Values.speaker.url }}"
             - { name: PORT, value: "8000" }
+            - { name: STATE, value: /data/state.json }
             # This app as the speakers reach it: gmk's own address, from
             # Kubernetes, so it is right even after gmk has moved (D11).
             - name: HOST_IP
@@ -65,7 +67,10 @@ spec:
             capabilities: { drop: [ALL] }
           volumeMounts:
             - { name: clip, mountPath: /clip, readOnly: true }
+            - { name: data, mountPath: /data }
       volumes:
+        - name: data
+          persistentVolumeClaim: { claimName: {{ include "candy.name" . }} }
         # Made from the laptop by ./jasbros candy clip, never by this chart:
         # the clip is from a film, and this repo is public.
         - name: clip

@@ -146,9 +146,11 @@ class Groups(unittest.TestCase):
 
     def watcher(self, costumes=(), counts=()):
         self.eyes = Eyes(costumes, counts)
-        return watch.Watcher(Camera(), self.detector, self.eyes,
-                             self.interaction, clock=self.clock,
-                             background=now)
+        w = watch.Watcher(Camera(), self.detector, self.eyes,
+                          self.interaction, clock=self.clock,
+                          background=now, state=None)
+        w.switch(True)
+        return w
 
     def run_frames(self, w, people, n):
         self.detector.next = people
@@ -276,7 +278,7 @@ class Groups(unittest.TestCase):
 
     def test_without_claude_it_still_tracks_people(self):
         w = watch.Watcher(Camera(), self.detector, None, self.interaction,
-                          clock=self.clock, background=now)
+                          clock=self.clock, background=now, state=None)
         self.run_frames(w, [person(0.1), person(0.5)], 3)
         self.assertEqual(len(w.status()["people"]), 2)
         self.assertFalse(w.status()["claude"])
@@ -291,3 +293,59 @@ class Pictures(unittest.TestCase):
         part = Image.open(io.BytesIO(watch.crop(jpeg(3840, 2160),
                                                 [0.5, 0.25, 0.75, 0.75])))
         self.assertTrue(900 < part.width < 1300 and 1100 < part.height < 1500)
+
+
+class Switch(unittest.TestCase):
+    def setUp(self):
+        import tempfile
+        self.tmp = tempfile.TemporaryDirectory()
+        self.state = Path(self.tmp.name) / "state.json"
+        self.clock, self.detector = Clock(), Detector()
+        self.interaction = Interaction()
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def watcher(self, costumes=()):
+        self.eyes = Eyes(costumes)
+        return watch.Watcher(Camera(), self.detector, self.eyes,
+                             self.interaction, clock=self.clock,
+                             background=now, state=self.state)
+
+    def run_frames(self, w, people, n):
+        self.detector.next = people
+        for _ in range(n):
+            w.step(FRAME)
+            self.clock.now += 1
+
+    def test_off_unless_switched_on(self):
+        w = self.watcher()
+        self.assertFalse(w.on)
+        self.run_frames(w, [], 1)
+        self.run_frames(w, [person(0.1)], 30)
+        self.assertEqual(self.eyes.looks, 0)            # Claude never asked
+        self.assertEqual(self.interaction.welcomed, [])
+        self.assertEqual(len(w.status()["people"]), 1)  # but still seen
+
+    def test_on_greets(self):
+        w = self.watcher(costumes=[("scary witch", 1)])
+        w.switch(True)
+        self.run_frames(w, [], 1)
+        self.run_frames(w, [person(0.1)], 10)
+        self.assertEqual(self.interaction.welcomed, ["scary witch"])
+
+    def test_whoever_switched_it_on_isnt_greeted(self):
+        w = self.watcher(costumes=[("a person in a jacket", 1),
+                                   ("tiny astronaut", 1)])
+        self.run_frames(w, [person(0.1)], 5)            # standing there
+        w.switch(True)
+        self.run_frames(w, [person(0.1)], 20)
+        self.assertEqual(self.interaction.welcomed, [])
+        self.run_frames(w, [person(0.1), person(0.6)], 10)
+        self.assertEqual(self.interaction.welcomed, ["a person in a jacket"])
+
+    def test_the_switch_survives_a_restart(self):
+        self.watcher().switch(True)
+        self.assertTrue(self.watcher().on)
+        self.watcher().switch(False)
+        self.assertFalse(self.watcher().on)
