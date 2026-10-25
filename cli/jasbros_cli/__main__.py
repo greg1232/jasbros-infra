@@ -6,7 +6,7 @@ See docs/cli.md.
 import argparse
 import sys
 
-from . import doctor, gmk, k8s, speaker
+from . import dashboard, doctor, gmk, k8s, speaker
 
 
 def main() -> int:
@@ -16,7 +16,7 @@ def main() -> int:
         prog="jasbros", description=__doc__,
         formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = parser.add_subparsers(dest="command", required=True)
-    for module in (doctor, gmk, k8s, speaker):
+    for module in (doctor, gmk, k8s, speaker, dashboard):
         module.add_parser(sub)
     args = parser.parse_args()
     return args.func(args) or 0

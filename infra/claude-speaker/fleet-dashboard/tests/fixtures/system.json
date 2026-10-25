@@ -1,0 +1,53 @@
+{
+ "cpu": 23.9,
+ "temperature": 59.4,
+ "memory": {
+  "total": 2985963520,
+  "used": 1160650752,
+  "used_percent": 38.9
+ },
+ "disk": {
+  "total": 30793338880,
+  "free": 20984262656,
+  "used_percent": 31.9
+ },
+ "uptime_hours": 493.3,
+ "load": [
+  1.33,
+  1.07,
+  1.01
+ ],
+ "throttling": {
+  "under voltage now": false,
+  "throttled now": false,
+  "under voltage since boot": false,
+  "throttled since boot": false
+ },
+ "services": {
+  "claude-speaker": "active",
+  "librespot": "active",
+  "claude-relearn.timer": "active"
+ },
+ "history": [
+  {
+   "at": 1792952175.5192208,
+   "cpu": 22.6,
+   "temp": 57.9,
+   "memory": 38.8
+  },
+  {
+   "at": 1792952185.5201979,
+   "cpu": 22.9,
+   "temp": 59.4,
+   "memory": 38.8
+  },
+  {
+   "at": 1792952195.5217354,
+   "cpu": 22.5,
+   "temp": 57.5,
+   "memory": 38.7
+  }
+ ],
+ "address": "192.168.4.22",
+ "cores": 4
+}

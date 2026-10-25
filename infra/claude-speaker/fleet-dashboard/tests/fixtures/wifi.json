@@ -1,0 +1,32 @@
+{
+ "connected": "solus",
+ "signal": 84,
+ "address": "192.168.4.95",
+ "networks": [
+  {
+   "name": "solus",
+   "signal": 100
+  },
+  {
+   "name": "NEIGHBOUR-NETWORK",
+   "signal": 70
+  }
+ ],
+ "can_change": true,
+ "saved": [
+  {
+   "name": "netplan-wlan0-solus",
+   "ssid": "solus",
+   "autoconnect": true,
+   "priority": 0,
+   "current": true
+  }
+ ],
+ "rescue": {
+  "active": false,
+  "name": "Claude Speaker pi4",
+  "password": "RESCUE-PASSWORD",
+  "since": 0,
+  "adrift": 0
+ }
+}

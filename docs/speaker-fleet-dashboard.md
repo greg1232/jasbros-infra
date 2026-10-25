@@ -1,5 +1,9 @@
 # Speaker fleet dashboard
 
+**Built and running (2026-10-25)** at `http://192.168.4.108/speakers`.
+Code in `infra/claude-speaker/fleet-dashboard/`, chart in
+`infra/claude-speaker/charts/speaker-fleet-dashboard/`.
+
 One page, served from gmk, that shows every Claude speaker in the house:
 is it up, what is it doing, is the Pi healthy, and which network is it on.
 
@@ -30,7 +34,7 @@ across the top:
 | Wake-word firings in the last 24 h, and how many were "woke, nobody spoke" | `/api/speaker` wake summary |
 | CPU, temperature, memory, disk, uptime, **throttling** | `/api/system` |
 | Services: `claude-speaker`, `librespot`, `claude-relearn.timer` | `/api/system` |
-| Wi-Fi network and signal | `/api/wifi` (current network only) |
+| Wi-Fi network and signal | `/api/wifi` (current network only), asked **every 5 minutes**, not every poll: it scans the air and takes ~4 s on a Pi 4. The neighbours' networks and the rescue password in that reply are dropped |
 | Code version deployed | new `/api/version` (see below) |
 | Link to the speaker's own page | the speaker's current address + port |
 | **Moved**: was `.22`, now `.31` | discovery (below) |
@@ -125,7 +129,7 @@ expected.
 Small, additive, and in the same style as the code around them:
 
 1. **`GET /api/version`** in `src/dashboard.py`, returning
-   `{"name": <hostname>, "commit": …, "deployed_at": …}`. The name is what
+   `{"name": <hostname>, "commit": …, "changed": <uncommitted?>, "deployed_at": …}`. The name is what
    discovery matches on (`card.py` already sets the hostname to the speaker's
    name). The commit and time come from a `VERSION` file that `deploy.py`
    writes next to the code. A speaker on old code answers 404 here, so
@@ -155,7 +159,7 @@ templates/
 ```yaml
 image:
   repository: docker.io/gdiamos/speaker-fleet-dashboard
-  tag: ""                 # set by ./jasbros dashboard deploy to the git sha
+  tag: ""                 # set by ./jasbros dashboard deploy: a hash of the image's files
 pollSeconds: 15
 timeoutSeconds: 3
 downAfterMinutes: 5
@@ -184,15 +188,19 @@ first poll round is done.
 Deploying:
 
 ```
-./jasbros dashboard build    # docker buildx --platform linux/amd64 --push :<git-sha>
-./jasbros dashboard deploy   # helm upgrade --install speaker-fleet-dashboard \
-                             #   -n claude-speaker --create-namespace \
-                             #   --set image.tag=<sha> -f <rendered speakers>
+./jasbros dashboard build    # run the tests, then docker buildx --platform linux/amd64 --push
+./jasbros dashboard deploy   # build if that tag isn't pushed yet, then helm upgrade --install
+                             #   -n claude-speaker, speakers rendered from the inventory
 ```
+
+The image tag is a hash of `Dockerfile`, `fleet.py` and `page.html`, not a git
+commit. The same code always gets the same tag, so a second deploy changes
+nothing, and uncommitted changes still get a tag of their own.
 
 ## Testing
 
-- Unit tests (stdlib `unittest`, run by `./jasbros test`): parsing real
+- Unit tests (stdlib `unittest`, run by `./jasbros dashboard build` before
+  every build, or `python3 -m unittest discover -s tests`): parsing real
   saved `/api/speaker` and `/api/system` responses (recorded from a live
   Pi into `fleet-dashboard/tests/fixtures/`), checking transcripts are
   stripped, and the up / looking / moved / down state machine against a

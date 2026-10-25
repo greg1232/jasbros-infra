@@ -356,6 +356,22 @@ def system_state() -> dict:
     }
 
 
+def version_state() -> dict:
+    """Which speaker this is, and which code it is running.
+
+    The fleet dashboard on gmk finds a speaker by its name, not its address,
+    because the router moves addresses about — so the name here is the one
+    thing it matches on. The rest is what ./deploy.sh wrote into VERSION.
+    """
+    out = {"name": socket.gethostname()}
+    try:
+        out.update(json.loads(
+            (config.PROJECT_ROOT / "VERSION").read_text()))
+    except Exception:
+        out["commit"] = "unknown"
+    return out
+
+
 def wishes_state() -> dict:
     """What every speaker has been asked for and cannot do.
 
@@ -652,6 +668,8 @@ class Pages(http.server.BaseHTTPRequestHandler):
                 return self._json(system_state())
             if path == "/api/wishes":
                 return self._json(wishes_state())
+            if path == "/api/version":
+                return self._json(version_state())
             if path == "/api/wifi":
                 return self._json(wifi_state())
         except Exception as error:

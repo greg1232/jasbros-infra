@@ -1,0 +1,6 @@
+apiVersion: v2
+name: speaker-fleet-dashboard
+description: Every Claude speaker in the house, on one page. See docs/speaker-fleet-dashboard.md.
+type: application
+version: 0.1.0
+appVersion: "0.1.0"

@@ -1,0 +1,190 @@
+<!doctype html><meta charset=utf-8>
+<meta name=viewport content="width=device-width,initial-scale=1">
+<title>Speakers</title>
+<style>
+/* The speaker's own dashboard's look (src/dashboard.py), so the two read
+   as one thing. */
+:root{color-scheme:light dark;--edge:#8883;--dim:#8889;--good:#3a3;--bad:#c44;
+  --warn:#c80;--series:#2a78d6;--axis:#8884}
+@media (prefers-color-scheme:dark){:root{--series:#3987e5}}
+*{box-sizing:border-box}
+body{font:15px/1.5 system-ui,sans-serif;margin:0;padding:1.5rem 1rem 3rem}
+main{max-width:72rem;margin:0 auto}
+h1{font-size:1.15rem;margin:0 0 .25rem}
+.sub{color:var(--dim);font-size:.85rem;margin-bottom:1.25rem}
+.grid{display:grid;
+  grid-template-columns:repeat(auto-fill,minmax(min(21rem,100%),1fr));
+  gap:1rem}
+.card{border:1px solid var(--edge);border-radius:12px;padding:1rem 1.1rem;
+  margin-bottom:1rem;min-width:0}
+.grid .card{margin:0}
+.card h2{font-size:1rem;margin:0;display:flex;align-items:center;gap:.5rem;
+  flex-wrap:wrap}
+.card h3{font-size:.8rem;text-transform:uppercase;letter-spacing:.06em;
+  color:var(--dim);margin:0 0 .6rem;font-weight:600}
+.where{color:var(--dim);font-size:.82rem;margin:.15rem 0 .8rem}
+.where a{color:inherit}
+.tiles{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:.5rem;
+  margin-bottom:.6rem}
+.tile{border:1px solid var(--edge);border-radius:10px;padding:.45rem .55rem}
+.tile b{display:block;font-size:1.15rem;font-weight:600;line-height:1.2;
+  font-variant-numeric:tabular-nums}
+.tile span{color:var(--dim);font-size:.72rem}
+.row{display:flex;justify-content:space-between;gap:1rem;padding:.3rem 0;
+  border-bottom:1px solid var(--edge);font-size:.9rem}
+.row:last-of-type{border:0}
+.row>span:first-child{color:var(--dim)}
+.row>span:first-child{flex:none}
+.row>span:last-child{text-align:right;overflow-wrap:anywhere;min-width:0}
+.pill{border:1px solid var(--edge);border-radius:999px;padding:.05rem .55rem;
+  font-size:.78rem;font-weight:500;white-space:nowrap}
+.up{border-color:var(--good);color:var(--good)}
+.looking{border-color:var(--warn);color:var(--warn)}
+.down{border-color:var(--bad);color:var(--bad)}
+.warn{border-color:var(--bad)}
+.warn li{margin:.2rem 0}
+.warn ul{margin:0;padding-left:1.1rem}
+.quiet{color:var(--dim)}
+svg{display:block;width:100%;height:auto;margin-top:.5rem}
+svg text{fill:var(--dim);font-size:9px;font-family:system-ui,sans-serif}
+.down-card{opacity:.75}
+</style>
+<main>
+  <h1>Speakers</h1>
+  <div class=sub id=sub>Asking the speakers…</div>
+  <div id=problems></div>
+  <div class=grid id=grid></div>
+  <div id=unknown></div>
+</main>
+<script>
+// Served under /speakers through the ingress and at / when run directly, so
+// every request is relative to wherever this page was opened.
+const base = location.pathname.endsWith('/') ? location.pathname
+                                             : location.pathname + '/';
+const esc = s => String(s ?? '').replace(/[&<>"']/g,
+  c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const num = (v, unit = '', digits = 0) =>
+  v === null || v === undefined ? '–' : `${(+v).toFixed(digits)}${unit}`;
+const ago = (then, now) => {
+  if (!then) return 'never';
+  const s = Math.max(0, Math.round(now - then));
+  if (s < 90) return `${s} s ago`;
+  if (s < 5400) return `${Math.round(s / 60)} min ago`;
+  return `${Math.round(s / 3600)} h ago`;
+};
+const hours = h => h === null || h === undefined ? '–'
+  : h < 48 ? `${Math.round(h)} h` : `${Math.round(h / 24)} d`;
+
+function doing(sp) {
+  if (!sp) return '–';
+  const out = [];
+  if (sp.ringing) out.push('a timer is ringing');
+  if (sp.talking) out.push('talking');
+  if (sp.music) out.push(`music: ${esc(sp.music)}`);
+  if (sp.sound) out.push(`sound: ${esc(sp.sound)}`);
+  if (sp.book) out.push(`reading: ${esc(sp.book)}`);
+  if (sp.timers) out.push(`${sp.timers} timer${sp.timers > 1 ? 's' : ''}`);
+  return out.join(', ') || '<span class=quiet>idle</span>';
+}
+
+// 24 h: temperature as a line, and a strip underneath that is red where it
+// was down. Ten-minute buckets from the dashboard's own history.
+function spark(history, now) {
+  const W = 320, H = 54, top = 4, line = 34, strip = 44;
+  const x = at => ((at - (now - 86400)) / 86400) * W;
+  const temps = history.filter(h => h.temperature !== null);
+  let path = '';
+  if (temps.length > 1) {
+    const lo = Math.min(...temps.map(h => h.temperature)) - 2;
+    const hi = Math.max(...temps.map(h => h.temperature)) + 2;
+    const y = t => top + (1 - (t - lo) / (hi - lo)) * (line - top);
+    path = `<path d="${temps.map((h, i) =>
+      `${i ? 'L' : 'M'}${x(h.at).toFixed(1)},${y(h.temperature).toFixed(1)}`
+    ).join('')}" fill=none stroke="var(--series)" stroke-width=1.5 />
+    <text x=${W} y=${top + 6} text-anchor=end>${hi - 2 | 0}°</text>
+    <text x=${W} y=${line} text-anchor=end>${lo + 2 | 0}°</text>`;
+  }
+  const bars = history.map(h => `<rect x=${x(h.at).toFixed(1)} y=${strip}
+    width=${(W / 144 + .5).toFixed(1)} height=6
+    fill="${h.up >= .99 ? 'var(--good)' : h.up > 0 ? 'var(--warn)' : 'var(--bad)'}"
+    opacity=.7 />`).join('');
+  return `<svg viewBox="0 0 ${W} ${H + 8}" role=img
+    aria-label="Temperature and uptime over the last 24 hours">
+    ${path}${bars}
+    <text x=0 y=${H + 7}>24 h ago</text>
+    <text x=${W} y=${H + 7} text-anchor=end>now</text></svg>`;
+}
+
+function card(s, now) {
+  const sys = s.system || {}, sp = s.speaker || {}, v = s.version || {};
+  const where = [`<a href="${esc(s.page)}">${esc(s.address)}</a>`];
+  if (s.moved_from) where.push(`moved from ${esc(s.moved_from)}`);
+  if (s.status !== 'up') where.push(`last seen ${ago(s.last_seen, now)}`);
+  if (s.error && s.status !== 'up') where.push(esc(s.error));
+  const services = Object.entries(sys.services || {}).map(([unit, state]) =>
+    `<span class="pill ${state === 'active' ? 'up' : 'down'}">${esc(unit)}</span>`
+  ).join(' ');
+  const mic = (sp.mic || {}).hearing;
+  const wake = sp.wake || {};
+  const wifi = s.wifi || {};
+  return `<div class="card ${s.status === 'down' ? 'down-card' : ''}">
+    <h2>${esc(s.name)} <span class="pill ${s.status}">${s.status}</span></h2>
+    <div class=where>${where.join(' · ')}</div>
+    ${s.system ? `
+    <div class=tiles>
+      <div class=tile><b>${num(sys.temperature, '°')}</b><span>temp</span></div>
+      <div class=tile><b>${num(sys.cpu, '%')}</b><span>cpu</span></div>
+      <div class=tile><b>${num(sys.memory, '%')}</b><span>memory</span></div>
+      <div class=tile><b>${num(sys.disk, '%')}</b><span>disk</span></div>
+    </div>
+    <div class=row><span>Doing</span><span>${doing(sp)}</span></div>
+    <div class=row><span>Microphone</span><span>${mic === false
+      ? '<span class="pill down">not hearing</span>'
+      : mic ? 'hearing' : '–'}</span></div>
+    <div class=row><span>Woken today</span><span>${num(wake.fired_today)}
+      · answered ${num(wake.answered_today)}</span></div>
+    <div class=row><span>Wi-Fi</span><span>${esc(wifi.network || '–')}
+      ${wifi.signal ? `· ${wifi.signal}%` : ''}</span></div>
+    <div class=row><span>Up for</span><span>${hours(sys.uptime_hours)}
+      ${sys.throttled_now ? '<span class="pill down">throttling</span>' : ''}
+      </span></div>
+    <div class=row><span>Code</span><span>${esc(v.commit || '–')}${
+      v.changed ? ' <span class="pill looking">uncommitted</span>' : ''}</span></div>
+    <div class=row><span>Services</span><span>${services || '–'}</span></div>`
+    : '<div class=quiet>Nothing heard from it yet.</div>'}
+    ${spark(s.history || [], now)}
+  </div>`;
+}
+
+async function refresh() {
+  let d;
+  try {
+    const r = await fetch(base + 'api/fleet', {cache: 'no-store'});
+    d = await r.json();
+  } catch (e) {
+    document.getElementById('sub').textContent =
+      'Can’t reach the dashboard — retrying.';
+    return;
+  }
+  const up = d.speakers.filter(s => s.status === 'up').length;
+  document.getElementById('sub').textContent =
+    `${up} of ${d.speakers.length} up · updated ${new Date(d.now * 1000)
+      .toLocaleTimeString()}` +
+    (d.last_rescan ? ` · last searched the network ${ago(d.last_rescan, d.now)}`
+                   : '');
+  document.getElementById('problems').innerHTML = d.problems.length
+    ? `<div class="card warn"><h3>Needs a look</h3><ul>${
+        d.problems.map(p => `<li>${esc(p)}</li>`).join('')}</ul></div>`
+    : '';
+  document.getElementById('grid').innerHTML =
+    d.speakers.map(s => card(s, d.now)).join('') ||
+    '<div class="card quiet">No speakers are configured.</div>';
+  document.getElementById('unknown').innerHTML = d.unknown.length
+    ? `<div class=card style="margin-top:1rem"><h3>Answering like a speaker,
+       but not in the inventory</h3>${d.unknown.map(u =>
+        `<div class=row><span>${esc(u.name)}</span><span>${esc(u.address)}
+        </span></div>`).join('')}</div>` : '';
+}
+refresh();
+setInterval(refresh, 5000);
+</script>

@@ -1,0 +1,60 @@
+{{- if not .Values.image.tag }}
+{{- fail "image.tag is empty — deploy with ./jasbros dashboard deploy" }}
+{{- end }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "fleet.name" . }}
+  labels: {{- include "fleet.labels" . | nindent 4 }}
+spec:
+  replicas: 1
+  # One SQLite file on a ReadWriteOnce volume: the old pod goes first.
+  strategy: { type: Recreate }
+  selector:
+    matchLabels: {{- include "fleet.labels" . | nindent 6 }}
+  template:
+    metadata:
+      labels: {{- include "fleet.labels" . | nindent 8 }}
+      annotations:
+        # A new speaker list rolls the pod.
+        checksum/config: {{ include "fleet.config" . | sha256sum }}
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        fsGroup: 10001
+        seccompProfile: { type: RuntimeDefault }
+      containers:
+        - name: dashboard
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          env:
+            - { name: FLEET_CONFIG, value: /config/fleet.json }
+            - { name: FLEET_DB, value: /data/fleet.db }
+            - { name: PORT, value: "8000" }
+          ports:
+            - { name: http, containerPort: 8000 }
+          readinessProbe:
+            httpGet: { path: /readyz, port: http }
+            periodSeconds: 5
+          livenessProbe:
+            httpGet: { path: /healthz, port: http }
+            initialDelaySeconds: 30
+            periodSeconds: 30
+          resources: {{- toYaml .Values.resources | nindent 12 }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: { drop: [ALL] }
+          volumeMounts:
+            - { name: config, mountPath: /config, readOnly: true }
+            - { name: data, mountPath: /data }
+            - { name: tmp, mountPath: /tmp }      # SQLite's temporary files
+      volumes:
+        - name: tmp
+          emptyDir: { sizeLimit: 64Mi }
+        - name: config
+          configMap: { name: {{ include "fleet.name" . }} }
+        - name: data
+          persistentVolumeClaim: { claimName: {{ include "fleet.name" . }} }

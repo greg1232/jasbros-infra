@@ -15,12 +15,14 @@ on both machines.
 """
 
 import argparse
+import json
 import os
 import re
 import shlex
 import subprocess
 import sys
 import tempfile
+import time
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
@@ -681,6 +683,30 @@ def copy_code(pi: Pi) -> None:
     indent("code, models/ and start.sh copied")
 
 
+def send_version(pi: Pi) -> None:
+    """Write down which code this is, for the fleet dashboard on gmk.
+
+    It is the commit of the repo this was deployed from, and whether the
+    files had changed since — a speaker running somebody's uncommitted
+    experiment should say so rather than claim to be the commit under it.
+    """
+    def git(*args: str) -> str:
+        return subprocess.run(["git", "-C", str(HERE), *args],
+                              capture_output=True, text=True).stdout.strip()
+    version = {"commit": git("rev-parse", "--short", "HEAD") or "unknown",
+               "changed": bool(git("status", "--porcelain", "--", ".")),
+               "deployed_at": time.strftime("%Y-%m-%dT%H:%M:%S%z")}
+    handle, path = tempfile.mkstemp()
+    try:
+        os.close(handle)
+        Path(path).write_text(json.dumps(version) + "\n")
+        pi.send(Path(path), f"{REMOTE_DIR}/VERSION")
+    finally:
+        Path(path).unlink(missing_ok=True)
+    indent(f"{version['commit']}"
+           f"{' with uncommitted changes' if version['changed'] else ''}")
+
+
 def send_settings(pi: Pi) -> None:
     handle, path = tempfile.mkstemp()
     try:
@@ -891,6 +917,7 @@ def main() -> int:
 
     step("Copying the code")
     copy_code(pi)
+    send_version(pi)
 
     step("Sending settings and API key")
     send_settings(pi)
