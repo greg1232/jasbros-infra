@@ -58,7 +58,10 @@ ARRIVAL = (
     "Two pictures from the candy camera. The first is cropped to some "
     "people who have just walked up; the second is the whole frame.\n"
     "- costume: what the people in the FIRST picture are dressed as, all of "
-    "them together in at most 8 words. Empty if they aren't in costume.\n"
+    "them together in at most 8 words, written to follow \"I see you're\" — "
+    "so with its article: \"a scary witch\", \"Darth Vader\", \"a skeleton "
+    "and a pirate\". Empty if they're in everyday clothes or you can't see "
+    "them well enough to tell — never guess.\n"
     "- people: how many people are in the first picture.\n"
     "From the SECOND picture:\n" + COUNT)
 
@@ -368,7 +371,10 @@ class Watcher:
             group.looked = True
             self._look_soon(self._arrival, group)
         elif self.groups:
-            if (now - self.last_look_at >= self.recount_every
+            # Counting needs a box Claude can see; until one has been
+            # counted, recounts would only ever come back "can't see it".
+            if (self.count is not None or self.baseline is not None) and (
+                    now - self.last_look_at >= self.recount_every
                     and self.recounts < self.recounts_per_group
                     and not self.calling_out):
                 self.recounts += 1
@@ -429,12 +435,23 @@ class Watcher:
 
     def _arrival(self, group: Group) -> None:
         still = self.camera.still()
-        tracks = [self.tracker.tracks[t] for t in group.tracks
-                  if t in self.tracker.tracks]
-        if not still or not tracks:
+        if not still:
             return
-        around = [min(t.box[0] for t in tracks), min(t.box[1] for t in tracks),
-                  max(t.box[2] for t in tracks), max(t.box[3] for t in tracks)]
+        # Find them in this very picture. The small frame the tracker saw is
+        # a second or two older, and someone walking through has moved on
+        # since — cropping where they *were* showed Claude empty yard.
+        in_still = [_normal(p["box"], _size(still))
+                    for p in self.detector.people(still)]
+        tracks = [self.tracker.tracks[t].box for t in group.tracks
+                  if t in self.tracker.tracks]
+        theirs = [b for b in in_still
+                  if any(_likeness(b, t, 0.2) > 0 for t in tracks)] or in_still
+        if not theirs:
+            with self.lock:
+                self._event(f"group {group.id} gone before a look")
+            return
+        around = [min(b[0] for b in theirs), min(b[1] for b in theirs),
+                  max(b[2] for b in theirs), max(b[3] for b in theirs)]
         seen = self.eyes.ask([crop(still, around), still], ARRIVAL,
                              ARRIVAL_SCHEMA)
         if not seen:

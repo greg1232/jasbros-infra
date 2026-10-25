@@ -41,8 +41,11 @@ class Clock:
 class Detector:
     def __init__(self):
         self.next, self.last_ms = [], 22.0
+        self.in_still = None            # None: the still shows what frames do
 
     def people(self, frame):
+        if frame is STILL and self.in_still is not None:
+            return list(self.in_still)
         return list(self.next)
 
 
@@ -173,6 +176,17 @@ class Groups(unittest.TestCase):
         arrivals = [q for q in self.eyes.questions if q[0] == "arrival"]
         self.assertEqual(arrivals, [("arrival", 2)])    # the crop, the frame
         self.assertEqual(self.interaction.welcomed, ["scary witch"])
+
+    def test_gone_by_the_time_of_the_still_isnt_welcomed(self):
+        # walked straight through: in the small frames, not in the 4K still
+        w = self.watcher(costumes=[("a person in a jacket", 1)])
+        self.detector.in_still = []
+        self.run_frames(w, [], 1)
+        self.run_frames(w, [person(0.1)], 10)
+        self.assertEqual(self.interaction.welcomed, [])
+        self.assertEqual([q for q in self.eyes.questions
+                          if q[0] == "arrival"], [])     # Claude not asked
+        self.assertTrue(any("gone before a look" in e for e in w.events))
 
     def test_kids_a_step_behind_join_the_group(self):
         w = self.watcher(costumes=[("a witch and a skeleton", 2)])

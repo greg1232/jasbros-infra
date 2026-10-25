@@ -10,6 +10,7 @@ Standard library only, like the fleet dashboard.
 """
 
 import argparse
+import hashlib
 import http.server
 import json
 import os
@@ -37,6 +38,8 @@ def welcome(costume: str = "") -> str:
     """The first thing a visitor hears. The costume comes from the camera —
     Claude names it from the first frame (step 3); until then, from whoever
     runs the demo."""
+    # Claude writes the phrase to follow "I see you're", article and all
+    # ("a scary witch", "Darth Vader"); only a bare noun gets one added.
     seen = f" I see you're {_a(costume)}!" if costume.strip() else ""
     # "jas" in lower case so the speaker says it like "jazz", not J-A-S.
     return (f"Welcome to the jas brothers Halloween candy computer!{seen} "
@@ -45,7 +48,8 @@ def welcome(costume: str = "") -> str:
 
 def _a(costume: str) -> str:
     costume = costume.strip().rstrip(".!")
-    if costume.lower().startswith(("a ", "an ", "the ")):
+    if costume.lower().startswith(("a ", "an ", "the ", "two ", "three ",
+                                   "some ")) or costume[:1].isupper():
         return costume
     return ("an " if costume[:1].lower() in "aeiou" else "a ") + costume
 
@@ -397,6 +401,11 @@ async function status() {
   let d;
   try { d = await (await fetch(base + 'api/status', {cache: 'no-store'})).json(); }
   catch (e) { $('sub').textContent = 'Can’t reach the candy computer — retrying.'; return; }
+  if (d.version && window.pageVersion && d.version !== window.pageVersion) {
+    location.reload();                 // a new page was deployed
+    return;
+  }
+  window.pageVersion = window.pageVersion || d.version;
   const cam = d.camera || {};
   $('sub').textContent = `Speaking through ${d.speaker} · ` +
     (d.clip ? 'film clip ready' : 'no film clip, so the speaker says the line') +
@@ -408,7 +417,7 @@ async function status() {
     : age === null ? 'waiting for the first picture'
     : ok ? 'live' : `last picture ${age} s ago`;
   const w = d.watch;
-  const colours = ['#ff8a1f', '#5bc4f0', '#c77dff', '#5bc46b', '#ffd23f'];
+  const colours = ['#5bc46b', '#ff8a1f', '#5bc4f0', '#c77dff', '#ffd23f'];
   const colour = g => colours[((g || 1) - 1) % colours.length];
   $('boxes').innerHTML = !w ? '' : w.people.map(p => {
     const [x1, y1, x2, y2] = p.box;
@@ -535,6 +544,11 @@ class Interaction:
         return self.call_out(costume, put_back, wait)
 
 
+# Which page this is. A kiosk never reloads by itself, so the page checks
+# this every few seconds and reloads when a deploy has changed it.
+VERSION = hashlib.sha256(PAGE.encode()).hexdigest()[:12]
+
+
 def serve(speaker: Speaker, port: int, here: str = "", clip: Path = CLIP,
           camera: "Camera | None" = None, watcher=None,
           interaction: "Interaction | None" = None
@@ -559,7 +573,7 @@ def serve(speaker: Speaker, port: int, here: str = "", clip: Path = CLIP,
                                       "text/plain")
                 return self._send(200, camera.frame, "image/jpeg")
             if path == "/api/status":
-                return self._json({"now": time.time(),
+                return self._json({"now": time.time(), "version": VERSION,
                                    "watch": watcher.status() if watcher
                                    else None,
                                    "camera": camera.status() if camera else {},
