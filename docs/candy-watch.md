@@ -61,22 +61,53 @@ something is blocking the box aren't counted.
 
 Refilling the box raises the count, and that simply sets a new baseline.
 
-### Seeing: Claude, not a trained model
+### Seeing: a small model on gmk decides when Claude looks (built)
 
-Each frame goes to Claude with a fixed question: *"How many pieces of candy
-are in the box? Is anything (a hand, an arm) blocking the view? Answer as
-JSON."* Claude's image understanding counts small objects well enough for a
-box on a counter, there's nothing to train, and the household's speakers
-already use the same API key.
+```
+ camera ──640×360, 1/s──► YOLOX-nano on gmk ──► tracker ──► groups
+                          (people, ~13 ms,       (IDs)       │
+                           1 thread)                         │ only at the moments that matter
+                                                             ▼
+                                   Claude (claude-opus-5-5, effort low), a 4K still:
+                                     · a new group has formed → costume (crop of just them) + count
+                                     · every 5 s while anyone's there → count only (≤6 per group)
+                                     · box alone 30 min → count (fresh baseline)
+```
 
-Cost and pace: one frame every 2 s *only while there's motion*. Reolink
-cameras report motion themselves, and until then a cheap local frame
-difference works. A quiet kitchen costs nothing.
-
-**Privacy:** frames are of the kids, including other families' kids at the
-door on Halloween, and they go to Anthropic's API. Frames
-are never stored, only the count. The pod's log says what was decided,
-never what was seen.
+- **The gate is YOLOX-nano** (Apache-2.0, Megvii; 0.9M parameters) on ONNX
+  Runtime with **one thread**. It's downloaded into the image by the
+  Dockerfile, pinned by checksum, and never committed. In the pod it takes
+  **~13 ms a frame**. The whole pod runs at **~5% of one CPU and ~70 MiB**,
+  held to **1 CPU / 1 GiB**. Picked over YOLOv8/11 because those are AGPL.
+  Tested on two public-domain trick-or-treat photos (`tests/fixtures/`):
+  2 and 3 people found, and none in the empty yard.
+- **The tracker** (`watch.Tracker`) gives each person an ID: boxes matched
+  frame to frame by overlap, or, since a frame a second is a long time for a
+  walking child, by a nearby centre and similar size. Two sightings make an
+  ID real, and 4 s unseen ends it.
+- **Groups:** a new ID starts a group, which is "forming" for 3 s, so kids a
+  step behind join it. Any new ID after that is a **new group, even while the
+  last one is still at the box**. **One costume look per group**, on a
+  crop of just its members. The welcome waits for the speaker if a
+  call-out is playing.
+- **The candy sums:** each group's starting count is the box *before they
+  arrived* (so grabbing before Claude first looks still counts). "Taken"
+  runs from the earliest group still there. The allowance is 2 × everyone
+  there. Over the limit **twice running** → a call-out naming the costumes
+  present. A count Claude marks `blocked` (an arm in the box) isn't
+  believed. **The same groups are called out once**, and a new group
+  resets that.
+- **No key, no Claude:** without the `candy-watch-claude` Secret
+  (`./jasbros candy key`), the pod still tracks people and shows them on
+  the dashboard. It never asks Claude.
+- Claude answers as structured JSON (`output_config.format`), with the
+  server-side refusal fallback on (`fallbacks: "default"`). Tested live on
+  the public-domain photo: *"a spooky grim reaper and a little witch"*,
+  2 people, in 6.7 s. So a welcome comes ~10 s after a group walks up
+  (3 s forming + the look).
+- **What it can't do:** count a big bowl exactly. Fewer, separated pieces
+  (a tray rather than a heap) make the counts, and so the call-outs,
+  trustworthy. Adults near the box count as people, and raise the allowance.
 
 ### Talking: the speakers' existing API
 

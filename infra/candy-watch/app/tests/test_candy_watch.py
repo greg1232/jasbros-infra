@@ -130,17 +130,18 @@ class Interactions(unittest.TestCase):
                                 sleep=lambda s: None).run(
             wait=10, costume="scary witch")
         self.assertEqual(self.heard(), [
-            candy_watch.welcome("scary witch"), candy_watch.CALL_OUT,
+            candy_watch.welcome("scary witch"),
+            candy_watch.call_out("scary witch"),
             candy_watch.LAST_CHANCE,
             "http://gmk/candy/clip/home-alone.flac"])
 
     def test_put_back_in_time(self):
-        checks = iter([False, False, True])
+        checks = iter([False, False, True])     # put back on the third look
         candy_watch.Interaction(self.speaker, "http://gmk/candy", self.clip,
                                 sleep=lambda s: None).run(
-            wait=10, put_back=lambda: next(checks))
+            wait=30, put_back=lambda: next(checks))
         self.assertEqual(self.heard(), [candy_watch.welcome(),
-                                        candy_watch.CALL_OUT,
+                                        candy_watch.call_out(),
                                         candy_watch.THANKS])
 
     def test_each_line_waits_for_the_last_to_finish(self):
@@ -252,17 +253,6 @@ class Clock:
 
     def tick(self, seconds):
         self.now += seconds
-
-
-class Watching(unittest.TestCase):
-    def test_only_while_someone_is_looking(self):
-        clock = Clock()
-        watched = candy_watch.Watched(clock)
-        self.assertFalse(watched())
-        watched.touch()
-        self.assertTrue(watched())
-        clock.tick(31)
-        self.assertFalse(watched())
 
 
 class Page(unittest.TestCase):

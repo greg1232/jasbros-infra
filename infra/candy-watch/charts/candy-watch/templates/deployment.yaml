@@ -11,6 +11,9 @@ metadata:
   labels: {{- include "candy.labels" . | nindent 4 }}
 spec:
   replicas: 1
+  # Never two at once: two watchers would welcome every group twice, ask
+  # Claude twice, and talk over each other on the speaker.
+  strategy: { type: Recreate }
   selector:
     matchLabels: {{- include "candy.labels" . | nindent 6 }}
   template:
@@ -31,6 +34,11 @@ spec:
           envFrom:
             - secretRef:
                 name: {{ include "candy.name" . }}-camera
+                optional: true
+            # The Claude API key, from ./jasbros candy key. Without it the
+            # pod still tracks people; it just never asks Claude.
+            - secretRef:
+                name: {{ include "candy.name" . }}-claude
                 optional: true
           env:
             - name: SPEAKER

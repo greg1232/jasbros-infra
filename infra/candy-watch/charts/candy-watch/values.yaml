@@ -14,6 +14,9 @@ ingress:
   enabled: true
   path: /candy
 
+# One CPU and 1 GiB at most, as asked. The detector runs on one thread
+# (~25 ms a frame, one frame a second) and decoding a 4K still for Claude is
+# the biggest thing in memory.
 resources:
-  requests: { cpu: 20m, memory: 32Mi }
-  limits: { cpu: 500m, memory: 128Mi }
+  requests: { cpu: 250m, memory: 256Mi }
+  limits: { cpu: "1", memory: 1Gi }

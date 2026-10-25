@@ -27,7 +27,8 @@ CLIP = HERE / "clip" / "home-alone.wav"
 APP = apps.App(
     name="candy-watch", namespace="candy-watch",
     source=HERE / "app", chart=HERE / "charts" / "candy-watch",
-    files=("Dockerfile", "candy_watch.py"), path="/candy",
+    files=("Dockerfile", "requirements.txt", "candy_watch.py", "vision.py",
+           "watch.py"), path="/candy",
     values=lambda: {"speaker": {"name": SPEAKER,
                                 "url": apps.speaker_url(SPEAKER)}})
 
@@ -138,6 +139,31 @@ def camera(args) -> int:
     say(f"camera login in the cluster as secret {APP.name}-camera")
     if shutil.which("open") and not args.no_open:
         run(["open", str(out)])
+    return 0
+
+
+def key(args) -> int:
+    """Give candy watch the speakers' Claude API key, as a Secret."""
+    env = INFRA / "claude-speaker" / ".env"
+    found = [line.split("=", 1)[1].strip() for line in env.read_text()
+             .splitlines() if line.startswith("ANTHROPIC_API_KEY=")] \
+        if env.is_file() else []
+    if not found or not found[0]:
+        return fail(f"no ANTHROPIC_API_KEY in {env}")
+    # Built here and piped in, so the key is never on a command line.
+    secret = {"apiVersion": "v1", "kind": "Secret",
+              "metadata": {"name": f"{APP.name}-claude",
+                           "namespace": APP.namespace},
+              "type": "Opaque", "stringData": {"ANTHROPIC_API_KEY": found[0]}}
+    code = subprocess.run(
+        ["kubectl", "apply", "--server-side", "--field-manager=jasbros",
+         "-f", "-"], input=json.dumps(secret), env=kube_env(), text=True,
+        capture_output=True).returncode
+    if code:
+        return fail("couldn't put the key in the cluster")
+    say(f"Claude API key in the cluster as secret {APP.name}-claude; "
+        f"restart candy watch to use it: ./jasbros k8s -n {APP.namespace} "
+        f"rollout restart deploy/{APP.name}")
     return 0
 
 
@@ -263,6 +289,9 @@ def add_parser(sub) -> None:
     p.add_argument("--no-open", action="store_true",
                    help="don't open the snapshot")
     p.set_defaults(func=camera)
+
+    commands.add_parser("key", help="give candy watch the Claude API key "
+                        "(from the speakers' .env)").set_defaults(func=key)
 
     p = commands.add_parser("clip", help="get the Home Alone clip and put "
                             "it in the cluster")

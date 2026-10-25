@@ -13,6 +13,8 @@ import argparse
 import http.server
 import json
 import os
+import signal
+import sys
 import threading
 import time
 import urllib.error
@@ -46,7 +48,12 @@ def _a(costume: str) -> str:
         return costume
     return ("an " if costume[:1].lower() in "aeiou" else "a ") + costume
 
-CALL_OUT = "Hey! I see you took more than two candies. Put them back."
+CALL_OUT = "I see you took more than two candies. Put them back."
+
+
+def call_out(costume: str = "") -> str:
+    who = costume.strip().rstrip(".!")
+    return f"Hey{', ' + who if who else ''}! {CALL_OUT}"
 THANKS = "Thank you. Enjoy your two."
 LAST_CHANCE = "You didn't put them back. All right..."
 
@@ -169,9 +176,11 @@ class Camera:
         self.token = answer[0]["value"]["Token"]["name"]
         return True
 
-    def snap(self) -> bytes | None:
-        """The newest frame, or None. Logs in when it has to, and once more
-        if the token has run out — never in a loop."""
+    def snap(self, size: str | None = None) -> bytes | None:
+        """The newest small frame (or, with size="", a full 4K still), or
+        None. Logs in when it has to, and once more if the token has run
+        out — never in a loop."""
+        size = self.SIZE if size is None else size
         with self.lock:
             for attempt in (1, 2):
                 if not self.token and not self.login():
@@ -179,18 +188,23 @@ class Camera:
                 try:
                     kind, data = self.fetch(
                         f"http://{self.host}/cgi-bin/api.cgi?cmd=Snap"
-                        f"&channel=0&rs=candy{int(self.clock())}{self.SIZE}"
+                        f"&channel=0&rs=candy{int(self.clock())}{size}"
                         f"&token={self.token}")
                 except Exception as error:
                     self.error = f"can't reach the camera — {type(error).__name__}"
                     return None
                 if kind.startswith("image/"):
-                    self.frame, self.frame_at, self.error = (data,
-                                                             self.clock(), "")
+                    self.error = ""
+                    if size == self.SIZE:       # the live view is the small one
+                        self.frame, self.frame_at = data, self.clock()
                     return data
                 self.token = ""         # expired: one fresh login, then stop
             self.error = "the camera answered, but not with a picture"
             return None
+
+    def still(self) -> bytes | None:
+        """One full-resolution still, for Claude — 4K, about a second."""
+        return self.snap(size="")
 
     def status(self) -> dict:
         return {"host": self.host, "error": self.error,
@@ -198,13 +212,19 @@ class Camera:
                 and not self.error}
 
 
-def keep_looking(camera: "Camera", watched, every: float = 2) -> None:
-    """A frame every couple of seconds while someone is looking at the page
-    (gmk's screen always is) — and none at all while nobody is."""
+def keep_watching(camera: "Camera", watcher, every: float = 1) -> None:
+    """A small frame a second, through the detector — always, whether or not
+    anyone has the page open, because that's the job. ~25 ms of one CPU."""
     while True:
-        if watched():
-            camera.snap()
-        time.sleep(every)
+        started = time.time()
+        frame = camera.snap()
+        if frame and watcher is not None:
+            try:
+                watcher.step(frame)
+            except Exception as error:         # one bad frame isn't the end
+                print(f"[candy] watch step failed: {type(error).__name__}: "
+                      f"{error}", flush=True)
+        time.sleep(max(0.0, every - (time.time() - started)))
 
 
 def _get_json(url: str, timeout: float) -> dict | None:
@@ -274,6 +294,22 @@ button{font:inherit;padding:.5rem .85rem;border-radius:9px;margin:0 .3rem .3rem 
   border:1px solid var(--edge);background:transparent;color:inherit;cursor:pointer}
 button:hover{border-color:var(--pumpkin)}
 #out{color:var(--dim);font-size:.85rem;margin-top:.4rem}
+.box{position:absolute;border:3px solid var(--pumpkin);border-radius:6px}
+.box span{position:absolute;top:-1.5rem;left:-3px;background:var(--pumpkin);
+  color:#000;font-size:.75rem;font-weight:700;padding:.05rem .4rem;
+  border-radius:4px 4px 4px 0;white-space:nowrap}
+.nums{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:.5rem;
+  margin:.4rem 0 .8rem}
+.num{border:1px solid var(--edge);border-radius:10px;padding:.4rem .5rem}
+.num b{display:block;font-size:1.4rem;line-height:1.2;
+  font-variant-numeric:tabular-nums}
+.num span{color:var(--dim);font-size:.72rem}
+.num.bad b{color:var(--bad)}
+.group{padding:.3rem 0;border-bottom:1px solid var(--edge)}
+.group:last-child{border:0}
+.log{font:12px/1.5 ui-monospace,monospace;color:var(--dim);margin-top:.6rem;
+  max-height:9rem;overflow:auto}
+.small{color:var(--dim);font-size:.8rem}
 </style>
 <main>
 <h1>JAS Brothers <span>Halloween</span> candy computer</h1>
@@ -282,6 +318,7 @@ button:hover{border-color:var(--pumpkin)}
   <div>
     <div class=card>
       <div class=view><img id=frame alt="The candy box, live">
+        <div id=boxes></div>
         <div class=note id=note>Looking for the camera…</div></div>
       <div class=live><span class=dot id=dot></span><span id=live>&nbsp;</span></div>
     </div>
@@ -292,7 +329,19 @@ button:hover{border-color:var(--pumpkin)}
         will notice.</small></div>
     </div>
     <div class=card>
-      <h2>What's happening</h2>
+      <h2>Watching</h2>
+      <div id=groups class=idle>Nobody at the box.</div>
+      <div class=nums>
+        <div class=num><b id=n-base>–</b><span>to start</span></div>
+        <div class=num><b id=n-now>–</b><span>now</span></div>
+        <div class=num id=c-taken><b id=n-taken>–</b><span>taken</span></div>
+        <div class=num><b id=n-allowed>–</b><span>allowed</span></div>
+      </div>
+      <div class=small id=engine>&nbsp;</div>
+      <div class=log id=log></div>
+    </div>
+    <div class=card>
+      <h2>What the speaker said</h2>
       <div id=now class=idle>Watching the candy box.</div>
     </div>
     <div class=card>
@@ -348,6 +397,39 @@ async function status() {
   $('live').textContent = cam.error ? cam.error
     : age === null ? 'waiting for the first picture'
     : ok ? 'live' : `last picture ${age} s ago`;
+  const w = d.watch;
+  const colours = ['#ff8a1f', '#5bc4f0', '#c77dff', '#5bc46b', '#ffd23f'];
+  const colour = g => colours[((g || 1) - 1) % colours.length];
+  $('boxes').innerHTML = !w ? '' : w.people.map(p => {
+    const [x1, y1, x2, y2] = p.box;
+    return `<div class=box style="left:${x1*100}%;top:${y1*100}%;` +
+      `width:${(x2-x1)*100}%;height:${(y2-y1)*100}%;` +
+      `border-color:${colour(p.group)}"><span style="background:` +
+      `${colour(p.group)}">#${p.id}${p.group ? ' · group ' + p.group : ''}` +
+      `</span></div>`;
+  }).join('');
+  if (w) {
+    $('groups').className = w.groups.length ? '' : 'idle';
+    $('groups').innerHTML = w.groups.length ? w.groups.map(g =>
+      `<div class=group><b style="color:${colour(g.id)}">Group ${g.id}</b> · ` +
+      `${g.kids} ${g.kids === 1 ? 'person' : 'people'} · ` +
+      `${esc(g.costume) || '<span class=idle>looking…</span>'}</div>`).join('')
+      : (w.people.length ? 'Someone is walking up…' : 'Nobody at the box.');
+    const show = v => v === null || v === undefined ? '–' : v;
+    $('n-base').textContent = show(w.baseline);
+    $('n-now').textContent = show(w.count);
+    $('n-taken').textContent = show(w.taken);
+    $('n-allowed').textContent = w.groups.length ? w.allowed : '–';
+    $('c-taken').className = 'num' + (w.taken > w.allowed && w.groups.length
+                                       ? ' bad' : '');
+    $('engine').textContent = `Detector ${w.detector_ms} ms a frame on gmk · ` +
+      (w.claude ? `Claude asked ${w.claude_looks}×` +
+                  (w.claude_error ? ` · ${w.claude_error}` : '')
+                : 'no Claude key yet — people only');
+    $('log').innerHTML = w.events.slice().reverse().map(esc).join('<br>');
+  } else {
+    $('engine').textContent = 'Not watching: no camera or no detector.';
+  }
   const demo = d.demo || {};
   $('now').innerHTML = demo.steps && demo.steps.length
     ? `<ol>${demo.steps.map(s => `<li>${esc(s)}</li>`).join('')}</ol>` +
@@ -384,54 +466,58 @@ class Interaction:
                                                           sleep)
         self.steps: list[str] = []
         self.running = False
+        # One speaker, one thing at a time: a new group's welcome waits for
+        # a call-out in progress to finish rather than talking over it.
+        self.talking = threading.Lock()
 
     def _say(self, text: str) -> None:
         self.steps.append(text)
         self.speaker.say(text)
         self.speaker.wait_until_quiet(self.sleep)
 
-    def run(self, wait: float = 60, put_back=lambda: False,
-            costume: str = "") -> list[str]:
-        self.running, self.steps = True, []
-        try:
+    def welcome(self, costume: str = "") -> None:
+        """Someone has arrived: hello, and what they're dressed as."""
+        with self.talking:
+            self.steps = []
             self._say(welcome(costume))
-            self._say(CALL_OUT)
+
+    def call_out(self, costume: str, put_back, wait: float = 60) -> list[str]:
+        """Too many taken: ask for them back, then the film if they don't.
+        `put_back()` is asked about once a few seconds while it waits."""
+        self.running = True
+        try:
+            self.talking.acquire()
+            self._say(call_out(costume))
             waited = 0.0
             while waited < wait:
                 if put_back():
                     self._say(THANKS)
                     return self.steps
-                self.sleep(1)
-                waited += 1
+                self.sleep(5)
+                waited += 5
             self._say(LAST_CHANCE)
             self.steps.append("(the gangster)")
             gangster(self.speaker, self.here, self.clip)
             self.speaker.wait_until_quiet(self.sleep)
             return self.steps
         finally:
+            self.talking.release()
             self.running = False
 
-
-class Watched:
-    """When the page last asked for anything — frames are only fetched
-    while somebody is looking."""
-
-    def __init__(self, clock=time.time):
-        self.clock, self.at = clock, 0.0
-
-    def touch(self) -> None:
-        self.at = self.clock()
-
-    def __call__(self) -> bool:
-        return self.clock() - self.at < 30
+    def run(self, wait: float = 60, put_back=lambda: False,
+            costume: str = "") -> list[str]:
+        """The whole thing, as the demo button plays it."""
+        self.running = True
+        self.welcome(costume)
+        return self.call_out(costume, put_back, wait)
 
 
 def serve(speaker: Speaker, port: int, here: str = "", clip: Path = CLIP,
-          camera: "Camera | None" = None,
-          watched: "Watched | None" = None) -> http.server.ThreadingHTTPServer:
+          camera: "Camera | None" = None, watcher=None,
+          interaction: "Interaction | None" = None
+          ) -> http.server.ThreadingHTTPServer:
     """`here` is this app as the speakers reach it: http://<gmk>/candy."""
-    interaction = Interaction(speaker, here, clip)
-    watched = watched or Watched()
+    interaction = interaction or Interaction(speaker, here, clip)
     class Pages(http.server.BaseHTTPRequestHandler):
         protocol_version = "HTTP/1.1"
 
@@ -441,7 +527,6 @@ def serve(speaker: Speaker, port: int, here: str = "", clip: Path = CLIP,
                 return self._send(200, PAGE.encode(),
                                   "text/html; charset=utf-8")
             if path == "/api/frame.jpg":
-                watched.touch()
                 if camera is None:
                     return self._send(503, b"No camera is set up.",
                                       "text/plain")
@@ -451,8 +536,9 @@ def serve(speaker: Speaker, port: int, here: str = "", clip: Path = CLIP,
                                       "text/plain")
                 return self._send(200, camera.frame, "image/jpeg")
             if path == "/api/status":
-                watched.touch()
                 return self._json({"now": time.time(),
+                                   "watch": watcher.status() if watcher
+                                   else None,
                                    "camera": camera.status() if camera else {},
                                    "speaker": speaker.name,
                                    "speaker_url": speaker.url,
@@ -511,6 +597,23 @@ def serve(speaker: Speaker, port: int, here: str = "", clip: Path = CLIP,
     return server
 
 
+def make_watcher(camera: "Camera", interaction: "Interaction"):
+    """The detector always, if its model is here; Claude only with a key."""
+    import vision
+    import watch
+
+    if not vision.MODEL.is_file():
+        print(f"[candy] no detector model at {vision.MODEL} — live view only",
+              flush=True)
+        return None
+    detector = vision.Detector()
+    eyes = watch.Eyes() if os.environ.get("ANTHROPIC_API_KEY") else None
+    print(f"[candy] watching: detector on 1 thread; "
+          f"{'Claude ' + watch.MODEL if eyes else 'no Claude key — people only'}",
+          flush=True)
+    return watch.Watcher(camera, detector, eyes, interaction)
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     parser.add_argument("--speaker", default=os.environ.get("SPEAKER", ""),
@@ -520,6 +623,9 @@ def main() -> None:
     parser.add_argument("--here", default=os.environ.get("HERE", ""),
                         help="this app as the speakers reach it")
     args = parser.parse_args()
+    # As a container's first process Python ignores SIGTERM, so every
+    # restart would wait out Kubernetes' 30 s grace period. Go when asked.
+    signal.signal(signal.SIGTERM, lambda *_: sys.exit(0))
     name, _, url = args.speaker.partition("=")
     if not url:
         raise SystemExit("--speaker name=http://address:8080 (or $SPEAKER)")
@@ -534,12 +640,14 @@ def main() -> None:
                         os.environ.get("REOLINK_USER", ""),
                         os.environ.get("REOLINK_PASSWORD", ""))
         print(f"[candy] camera at {camera.host}", flush=True)
-    watched = Watched()
-    server = serve(speaker, args.port, args.here.rstrip("/"), CLIP, camera,
-                   watched)
+    interaction = Interaction(speaker, args.here.rstrip("/"), CLIP)
+    watcher = None
     if camera:
-        threading.Thread(target=keep_looking, args=(camera, watched),
+        watcher = make_watcher(camera, interaction)
+        threading.Thread(target=keep_watching, args=(camera, watcher),
                          daemon=True).start()
+    server = serve(speaker, args.port, args.here.rstrip("/"), CLIP, camera,
+                   watcher, interaction)
     threading.Thread(target=server.serve_forever, daemon=True).start()
     while True:
         time.sleep(3600)

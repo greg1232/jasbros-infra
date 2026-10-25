@@ -58,11 +58,18 @@ class App:
         if not force and self.pushed():
             say(f"{image} is already on Docker Hub — nothing to build")
             return 0
-        if (self.source / "tests").is_dir():
+        dockerfile = (self.source / "Dockerfile").read_text()
+        if " AS test" in dockerfile:
+            # The tests run inside the image, on its own Python and packages.
+            code = run(["docker", "buildx", "build", "--platform",
+                        "linux/amd64", "--target", "test", str(self.source)])
+        elif (self.source / "tests").is_dir():
             code = run(["python3", "-m", "unittest", "discover", "-s",
                         "tests"], cwd=self.source)
-            if code:
-                return fail("the tests failed, so nothing was built")
+        else:
+            code = 0
+        if code:
+            return fail("the tests failed, so nothing was built")
         return run(["docker", "buildx", "build", "--platform", "linux/amd64",
                     "--tag", image, "--push", str(self.source)])
 

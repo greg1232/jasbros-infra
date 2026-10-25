@@ -1,0 +1,6 @@
+# What candy watch needs beyond the standard library (the Dockerfile
+# installs these; the pod is held to 1 CPU and 1 GiB).
+onnxruntime==1.31.0     # YOLOX-nano, the person detector (vision.py)
+numpy>=2,<3
+pillow>=11,<13
+anthropic>=2.3,<3       # Claude, for costumes and counting (watch.py)
