@@ -39,3 +39,12 @@ class People(unittest.TestCase):
     def test_fast_enough_on_one_thread(self):
         self.detector.people(FIXTURES / "trick-or-treat-sweden.jpg")
         self.assertLess(self.detector.last_ms, 500)
+
+
+@unittest.skipUnless(vision.MODEL.is_file(), f"no model at {vision.MODEL}")
+class Visitors(unittest.TestCase):
+    def test_people_are_visitors_of_kind_person(self):
+        found = vision.Detector().visitors(
+            FIXTURES / "trick-or-treat-sweden.jpg")
+        self.assertEqual(sorted(v["kind"] for v in found),
+                         ["person", "person"])

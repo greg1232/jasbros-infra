@@ -57,17 +57,21 @@ COUNT = (
 ARRIVAL = (
     "A picture from the candy camera, cropped to some people who have just "
     "walked up.\n"
-    "- costume: what the people in the picture are dressed as, all of "
-    "them together, with a vivid detail or two you can actually see — "
+    "- costume: what everyone in the picture is dressed as — people and any "
+    "pets with them — all together, with a vivid detail or two you can "
+    "actually see — "
     "colours, accessories, how it's worn, anything funny about it — in at "
     "most 12 words, written to follow \"I see you're\", article and all: "
     "\"Darth Vader in cozy plaid pajamas\", \"a witch with a glowing green "
-    "broom\", \"a tiny skeleton and a very tall pirate\". Empty if they're "
-    "in everyday clothes or you can't see them well enough to tell — "
-    "describe only what's there, never guess.\n"
-    "- people: how many real people are in the picture. 0 if it's only "
-    "things that look a bit like a person — a birdhouse, a post, a "
-    "scarecrow, a shadow.")
+    "broom\", \"a pirate and a golden retriever in a pumpkin suit\". A pet "
+    "that isn't dressed up still gets mentioned (\"...and their fluffy "
+    "brown dog\"); a person in everyday clothes can be \"you and your "
+    "fluffy brown dog\". Empty only if nobody is in costume and there's no "
+    "pet — describe only what's there, never guess.\n"
+    "- people: how many real people are in the picture (not pets). 0 if "
+    "there are none — only pets, or things that look a bit like a person: "
+    "a birdhouse, a post, a scarecrow, a shadow.\n"
+    "- animals: how many real animals (dogs, cats) are in the picture.")
 
 RECOUNT = "One picture from the candy camera.\n" + COUNT
 
@@ -81,8 +85,9 @@ COUNT_SCHEMA = {
 ARRIVAL_SCHEMA = {
     "type": "object",
     "properties": {"costume": {"type": "string"},
-                   "people": {"type": "integer"}},
-    "required": ["costume", "people"],
+                   "people": {"type": "integer"},
+                   "animals": {"type": "integer"}},
+    "required": ["costume", "people", "animals"],
     "additionalProperties": False,
 }
 
@@ -209,6 +214,7 @@ class Track:
     hits: int = 1
     group: int | None = None
     need: int = 2                   # sightings before it counts
+    kind: str = "person"            # or "dog", "cat": they don't get candy
 
     @property
     def confirmed(self) -> bool:
@@ -231,8 +237,10 @@ class Tracker:
         self.tracks: dict[int, Track] = {}
         self.ids = itertools.count(1)
 
-    def update(self, boxes: list[list[float]], now: float) -> list[Track]:
+    def update(self, boxes: list[list[float]], now: float,
+               kinds: list[str] | None = None) -> list[Track]:
         """Match this frame's boxes; returns tracks confirmed just now."""
+        kinds = kinds or ["person"] * len(boxes)
         pairs = []
         for tid, track in self.tracks.items():
             for i, box in enumerate(boxes):
@@ -253,7 +261,8 @@ class Tracker:
         for i, box in enumerate(boxes):
             if i not in used_b:
                 tid = next(self.ids)
-                self.tracks[tid] = Track(tid, box, now, now, need=self.need)
+                self.tracks[tid] = Track(tid, box, now, now, need=self.need,
+                                         kind=kinds[i])
         for tid, track in list(self.tracks.items()):
             unseen = now - track.last_at
             # A track not yet confirmed that misses a frame was noise.
@@ -372,13 +381,16 @@ class Watcher:
 
     def step(self, small) -> None:
         """One frame: JPEG bytes from a snapshot, or a decoded stream frame."""
-        found = self.detector.people(small)
+        look = getattr(self.detector, "visitors", self.detector.people)
         size = _size(small)
-        boxes = [b for b in (_normal(p["box"], size) for p in found)
-                 if not any(_iou(b, spot) >= 0.4 for spot in self.ignored)]
+        kept = [(_normal(p["box"], size), p.get("kind", "person"))
+                for p in look(small)]
+        kept = [(b, k) for b, k in kept
+                if not any(_iou(b, spot) >= 0.4 for spot in self.ignored)]
+        boxes, kinds = [b for b, _ in kept], [k for _, k in kept]
         now = self.clock()
         with self.lock:
-            for track in self.tracker.update(boxes, now):
+            for track in self.tracker.update(boxes, now, kinds):
                 if self.on:
                     self._join(track, now)
             self._end_groups()
@@ -414,7 +426,7 @@ class Watcher:
             self.recounts = 0
             self._event(f"group {group.id} arriving")
         group.tracks.add(track.id)
-        group.kids = max(group.kids, len(group.tracks))
+        group.kids = max(group.kids, self._people_in(group))
         track.group = group.id
         if not group.looked and self.on and self.eyes is not None:
             # Straight away, not after the forming window: kids a step
@@ -422,6 +434,12 @@ class Watcher:
             # wait was the slowest part of a welcome.
             group.looked = True
             self.background(self._arrival, group)
+
+    def _people_in(self, group: Group) -> int:
+        """People tracked in a group — pets come along but get no candy."""
+        return sum(1 for t in group.tracks
+                   if t in self.tracker.tracks
+                   and self.tracker.tracks[t].kind == "person")
 
     def _beside(self, track: Track) -> "Group | None":
         for group in self.groups.values():
@@ -543,8 +561,8 @@ class Watcher:
         # Find them in this very picture. The small frame the tracker saw is
         # a second or two older, and someone walking through has moved on
         # since — cropping where they *were* showed Claude empty yard.
-        in_still = [_normal(p["box"], _size(still))
-                    for p in self.detector.people(still)]
+        look = getattr(self.detector, "visitors", self.detector.people)
+        in_still = [_normal(p["box"], _size(still)) for p in look(still)]
         tracks = [self.tracker.tracks[t].box for t in group.tracks
                   if t in self.tracker.tracks]
         theirs = [b for b in in_still
@@ -562,13 +580,16 @@ class Watcher:
         seen = self._look_at(group)
         if not seen:
             return
-        if seen["people"] == 0:
+        if seen["people"] == 0 and seen.get("animals", 0) == 0:
             return self._not_people(group, boxes)
         with self.lock:
             group.costume = seen["costume"].strip()
             group.kids = max(group.kids, seen["people"])
+            pets = seen.get("animals", 0)
             self._event(f"group {group.id}: {group.kids} × "
-                        f"{group.costume or 'no costume seen'}")
+                        f"{group.costume or 'no costume seen'}"
+                        + (f" (+{pets} pet{'s' if pets > 1 else ''})"
+                           if pets else ""))
         if group.id not in self.groups:
             return                      # gone while Claude looked: no one to greet
         if group.costume:
@@ -580,7 +601,8 @@ class Watcher:
         """Someone joined a group already greeted: no second welcome, but
         see them all, so the parting joke is about everyone."""
         seen = self._look_at(group)
-        if not seen or not seen["costume"].strip() or seen["people"] == 0:
+        if not seen or not seen["costume"].strip() or (
+                seen["people"] == 0 and seen.get("animals", 0) == 0):
             return
         with self.lock:
             group.costume = seen["costume"].strip()

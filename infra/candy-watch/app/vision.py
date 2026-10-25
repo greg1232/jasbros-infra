@@ -25,7 +25,8 @@ from PIL import Image
 MODEL = Path(os.environ.get("VISION_MODEL", "/app/yolox_nano.onnx"))
 SIZE = 416
 STRIDES = (8, 16, 32)
-PERSON = 0              # COCO class 0
+PERSON = 0              # COCO classes: person,
+PETS = {15: "cat", 16: "dog"}   # and the trick-or-treaters' pets
 
 
 class Detector:
@@ -47,12 +48,24 @@ class Detector:
     def people(self, picture, threshold: float = 0.45) -> list[dict]:
         """Everyone in `picture` (JPEG bytes, a path, or a PIL image), as
         {"box": [x1, y1, x2, y2] in its own pixels, "score": 0–1}."""
+        return [v for v in self.visitors(picture, threshold)
+                if v["kind"] == "person"]
+
+    def visitors(self, picture, threshold: float = 0.45) -> list[dict]:
+        """People, and the dogs and cats that come with them, each with a
+        "kind" — a dog in a pumpkin suit is part of the group too."""
         image = _open(picture)
         tensor, ratio = _letterbox(image)
         started = time.perf_counter()
         raw = self.session.run(None, {self.input: tensor})[0][0]
         self.last_ms = (time.perf_counter() - started) * 1000
-        return _people(raw, ratio, self.grids, self.expanded, threshold)
+        found = [dict(p, kind="person") for p in
+                 _people(raw, ratio, self.grids, self.expanded, threshold)]
+        for cls, kind in PETS.items():
+            found += [dict(p, kind=kind) for p in
+                      _people(raw, ratio, self.grids, self.expanded,
+                              threshold, cls)]
+        return found
 
 
 def _open(picture) -> Image.Image:
@@ -84,10 +97,12 @@ def _grids() -> tuple[np.ndarray, np.ndarray]:
 
 
 def _people(raw: np.ndarray, ratio: float, grids: np.ndarray,
-            strides: np.ndarray, threshold: float) -> list[dict]:
+            strides: np.ndarray, threshold: float,
+            cls: int = PERSON) -> list[dict]:
+    """One COCO class's boxes (people unless told otherwise)."""
     xy = (raw[:, :2] + grids) * strides
     wh = np.exp(raw[:, 2:4]) * strides
-    scores = raw[:, 4] * raw[:, 5 + PERSON]
+    scores = raw[:, 4] * raw[:, 5 + cls]
     keep = scores >= threshold
     if not keep.any():
         return []

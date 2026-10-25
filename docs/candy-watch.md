@@ -122,6 +122,14 @@ Refilling the box raises the count, and that simply sets a new baseline.
   words ("Darth Vader in cozy plaid pajamas", "a spooky grim reaper with
   skeleton hands and a pointy-hatted witch"), still only what's actually
   there. The welcome stays under the speaker's 200 characters.
+- **Pets are part of the group:** the detector also reports dogs and cats
+  (COCO 16, 15), which join the group and the crop. Claude describes them
+  too: "a pirate and a golden retriever in a pumpkin suit", or "you and your
+  fluffy brown dog". People and animals are counted separately: **pets
+  don't raise the candy allowance**, and a group that's only a pet is
+  greeted, not learned as "not a person". (A dog had been counted as a
+  second person, and with no costume on the person, the welcome said
+  nothing about it.)
 - **False positives are learned:** when the costume look finds **no real
   people** (Claude reports `people: 0` for a birdhouse, a post, a
   scarecrow), there's no welcome and no joke, and that spot is remembered as

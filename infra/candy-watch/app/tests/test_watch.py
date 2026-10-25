@@ -44,6 +44,10 @@ class Detector:
         self.in_still = None            # None: the still shows what frames do
 
     def people(self, frame):
+        return [p for p in self.visitors(frame)
+                if p.get("kind", "person") == "person"]
+
+    def visitors(self, frame):
         if frame is STILL and self.in_still is not None:
             return list(self.in_still)
         return list(self.next)
@@ -400,6 +404,51 @@ class Groups(unittest.TestCase):
         self.run_frames(w, [person(0.1), person(0.5)], 3)
         self.assertEqual(len(w.status()["people"]), 2)
         self.assertFalse(w.status()["claude"])
+
+
+def dog(x, y=0.6):
+    return {"box": [x * 640, y * 360, (x + 0.12) * 640, (y + 0.25) * 360],
+            "score": 0.8, "kind": "dog"}
+
+
+class Pets(unittest.TestCase):
+    def setUp(self):
+        self.clock, self.detector = Clock(), Detector()
+        self.interaction = Interaction()
+
+    def watcher(self, costumes):
+        self.eyes = Eyes(costumes)
+        w = watch.Watcher(Camera(), self.detector, self.eyes,
+                          self.interaction, clock=self.clock,
+                          background=now, state=None)
+        w.switch(True)
+        return w
+
+    def run_frames(self, w, people, n):
+        self.detector.next = people
+        for _ in range(n):
+            w.step(FRAME)
+            self.clock.now += 1
+
+    def test_a_dog_comes_along_but_gets_no_candy(self):
+        w = self.watcher([("you and your fluffy brown dog", 1)])
+        self.run_frames(w, [], 1)
+        self.run_frames(w, [person(0.1), dog(0.22)], 6)
+        self.assertEqual(self.interaction.welcomed,
+                         ["you and your fluffy brown dog"])
+        self.assertEqual(w.allowed, 2)                  # one person, not two
+
+    def test_just_a_dog_is_greeted_and_its_spot_not_ignored(self):
+        w = self.watcher([])
+        w.eyes.ask = lambda stills, q, s: (
+            {"costume": "a golden retriever in a pumpkin suit", "people": 0,
+             "animals": 1} if q is watch.ARRIVAL
+            else {"candies": -1, "blocked": False})
+        self.run_frames(w, [], 1)
+        self.run_frames(w, [dog(0.4)], 6)
+        self.assertEqual(self.interaction.welcomed,
+                         ["a golden retriever in a pumpkin suit"])
+        self.assertEqual(w.ignored, [])
 
 
 class Pictures(unittest.TestCase):
