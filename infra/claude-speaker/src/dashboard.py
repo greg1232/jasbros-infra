@@ -595,6 +595,18 @@ def join_wifi(name: str, password: str) -> dict:
         return {"ok": False, "said": "No network name."}
     if not _can_change_wifi():
         return {"ok": False, "said": CANNOT_CHANGE}
+    # Being the access point, the radio can't see the network to join, and
+    # `nmcli device wifi connect` then builds a profile with no security
+    # type ("802-11-wireless-security.key-mgmt: property is missing"). Saving
+    # it with the type spelled out, and standing the access point down, is
+    # what actually gets the speaker back — so in rescue mode, that's Join.
+    try:
+        import rescue
+        rescuing = rescue.active()
+    except Exception:
+        rescuing = False
+    if rescuing:
+        return save_wifi(name, password)
     args = ["nmcli", "device", "wifi", "connect", name]
     if password:
         args += ["password", password]
