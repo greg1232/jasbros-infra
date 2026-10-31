@@ -13,7 +13,7 @@ chart, with source in `infra/candy-watch/`.
 **Status (2026-10-25):** the dashboard is live at `http://192.168.4.108/candy`
 and **on gmk's screen**: the camera's live view (every 2 s while someone is
 looking), the rule, what's happening, and test controls. The camera is the
-**Reolink E1 Outdoor Pro "Front Yard" at `192.168.4.107`** (4K, pan-tilt-zoom,
+**Reolink E1 Outdoor Pro "Front Yard" at `192.168.4.112`** (was `.107` until 2026-10-31; no DHCP reservation) (4K, pan-tilt-zoom,
 wall powered), reached over its HTTP API. It isn't aimed at the candy box yet.
 Step 1 is done. The pod runs on gmk at
 `http://192.168.4.108/candy`, and `./jasbros candy say …` / `--gangster`
@@ -250,7 +250,7 @@ The chart reads it with `envFrom` (`optional`). The camera's address is in
 
 | # | Question | Default |
 |---|---|---|
-| C1 | Which speaker talks? | pi4 for now; one value to change |
+| C1 | Which speaker talks? | office (192.168.4.111) since 2026-10-31; `SPEAKER` in `cli/jasbros_cli/candy.py` |
 | C2 | How long to put it back? | 60 s |
 | C3 | "More than 2" per what: per visit to the box, or per hour/day? | Per visit: the count settles, then compare to before |
 | C4 | Should it say who? It can't tell the kids apart | No names. "Hey, you", or by costume: "Hey, witch!" |

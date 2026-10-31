@@ -7,7 +7,7 @@ image:
   pullPolicy: IfNotPresent
 
 speaker:
-  name: pi4
+  name: office
   url: ""                 # http://<address>:8080, from the inventory
 
 ingress:

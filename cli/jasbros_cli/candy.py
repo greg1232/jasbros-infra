@@ -15,7 +15,7 @@ from . import apps, inventory
 from .common import INFRA, KUBECONFIG, VENV, fail, kube_env, need, run, say
 
 HERE = INFRA / "candy-watch"
-SPEAKER = "pi4"
+SPEAKER = "office"
 
 # The scene in Home Alone where Kevin plays the gangster film. Your own
 # copy of its audio is downloaded on request, kept in clip/ (gitignored),

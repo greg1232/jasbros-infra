@@ -27,10 +27,12 @@ all:
           ansible_host: 192.168.4.22
         pi4:
           ansible_host: 192.168.4.95
+        office:
+          ansible_host: 192.168.4.111
     cameras:
       # Not managed by Ansible — listed so ./jasbros knows where they are.
       # Logins live in ~/.config/jasbros/reolink.env, never here.
       hosts:
         front-yard:
-          ansible_host: 192.168.4.107
+          ansible_host: 192.168.4.112
           model: Reolink E1 Outdoor Pro
