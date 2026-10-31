@@ -338,14 +338,29 @@ if id {user} >/dev/null 2>&1; then
           /home/{user}/.ssh/authorized_keys
 fi
 
-# Grow the filesystem to the card, here rather than by leaving `resize` on
-# the kernel command line. That keyword is consumed by the first boot, so
-# juggling it between the hooked line and the restored one is fiddly and I
-# got it wrong: a card came up with a 29.2 GB partition and a 5.6 GB
-# filesystem on it, which is not enough room for the speaker. ext4 grows
-# while mounted, so this just works and needs no keyword at all.
+# Grow the filesystem to fill its partition — on every boot, not only this
+# one. Doing it only here was the bug: this runs before Pi OS has grown the
+# partition (that happens on a later boot, from `resize` on the restored
+# command line), so resize2fs said "Nothing to do!" and the card came up
+# with a 31 GB partition and a 5.6 GB filesystem. The speaker's Python
+# packages don't fit in that, and the deploy died on "No space left on
+# device". ext4 grows while mounted, and on a filesystem that already fills
+# its partition resize2fs is a no-op, so running it every boot costs nothing.
 ROOTDEV=$(findmnt -no SOURCE /)
 resize2fs "$ROOTDEV" || true
+cat > /etc/systemd/system/claude-growfs.service <<'UNIT'
+[Unit]
+Description=Grow the root filesystem to fill its partition
+After=local-fs.target
+
+[Service]
+Type=oneshot
+ExecStart=/bin/bash -c 'resize2fs "$(findmnt -no SOURCE /)"'
+
+[Install]
+WantedBy=multi-user.target
+UNIT
+systemctl enable claude-growfs.service
 df -h /
 
 rfkill unblock wifi || true
@@ -409,9 +424,10 @@ def prepare(boot: Path, name: str, user: str, password: str,
     # with nothing written down to say why. So the hook runs without it,
     # and the line restored afterwards keeps it, which does the resize on
     # the reboot instead.
-    # Keep resize out of the hooked line — a resize and a boot to a
-    # minimal target do not need to happen at once — but firstrun.sh grows
-    # the filesystem itself now, so nothing depends on this either way.
+    # The restored line's `resize` grows the partition on a later boot;
+    # the filesystem is then grown by claude-growfs.service, which
+    # firstrun.sh installs to run on every boot, since it can't know
+    # which boot that will be.
     hooked = re.sub(r"\s+resize\b", "", line)
     backup.write_text(line + "\n")
     cmdline.write_text(hooked + " " + RUN_HOOK + "\n")
